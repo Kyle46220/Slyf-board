@@ -1,0 +1,15 @@
+[Unit]
+Description=Board FastAPI backend
+After=network.target postgresql.service signal-cli.service
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/opt/board/backend
+EnvironmentFile=/etc/board.env
+ExecStart=/opt/board/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

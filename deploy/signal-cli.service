@@ -1,0 +1,15 @@
+[Unit]
+Description=signal-cli JSON-RPC daemon
+After=network.target
+
+[Service]
+Type=simple
+User=signal
+ExecStart=/usr/local/bin/signal-cli --config /var/signal-cli daemon --socket /var/run/signal-cli/socket
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=signal-cli
+RuntimeDirectoryMode=0750
+
+[Install]
+WantedBy=multi-user.target
