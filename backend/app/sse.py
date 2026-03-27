@@ -23,6 +23,7 @@ class SSEBroadcaster:
             await q.put(event)
 
     async def stream(self, q: asyncio.Queue) -> AsyncGenerator[str, None]:
+        yield ": connected\n\n"  # immediate flush so headers are sent
         try:
             while True:
                 event = await q.get()
