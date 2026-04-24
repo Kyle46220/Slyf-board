@@ -17,16 +17,31 @@ export function Board() {
   useEffect(() => {
     console.log("Board component mounted, starting initialization...");
 
-    // Fetch initial posts
+    // Fetch initial posts with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      setError("Connection timeout - server may be down");
+      setLoading(false);
+    }, 15000); // 15 second timeout
+
     fetchPosts()
       .then((data) => {
+        clearTimeout(timeoutId);
         console.log("Posts loaded successfully:", data);
         setPosts(data);
         setLoading(false);
+        setError(null); // Clear any previous errors
       })
       .catch((err) => {
-        console.error("Failed to fetch posts:", err);
-        setError("Failed to load posts");
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+          console.error("Request timeout");
+          setError("Connection timeout - server may be down");
+        } else {
+          console.error("Failed to fetch posts:", err);
+          setError("Failed to load posts");
+        }
         setLoading(false);
       });
 
@@ -38,6 +53,7 @@ export function Board() {
       es.onopen = () => {
         console.log("SSE connection opened");
         setSseConnected(true);
+        setError(null); // Clear connection errors on successful connect
       };
 
       es.onmessage = (e: MessageEvent<string>) => {
@@ -58,19 +74,24 @@ export function Board() {
 
       es.onerror = (err) => {
         console.error("SSE error:", err);
-        setError("Connection lost");
+        // Only set error on first connection failure, not during reconnection attempts
+        if (sseConnected) {
+          setError("Connection lost - will retry automatically");
+        }
         setSseConnected(false);
         // Don't close the connection, let it retry automatically
       };
 
       return () => {
         console.log("Cleaning up SSE connection");
+        clearTimeout(timeoutId);
         es.close();
       };
     } catch (err) {
       console.error("Failed to create EventSource:", err);
       setError("Failed to establish connection");
       setLoading(false);
+      clearTimeout(timeoutId);
     }
   }, []);
 

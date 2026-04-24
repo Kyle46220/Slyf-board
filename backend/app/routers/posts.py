@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,8 +10,6 @@ from app.sse import broadcaster
 
 router = APIRouter(prefix="/api")
 limiter = Limiter(key_func=lambda r: r.client.host if r.client else "unknown")
-
-router = APIRouter(prefix="/api")
 
 
 @router.get("/posts", response_model=list[PostOut])
