@@ -1,3 +1,4 @@
+import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -6,6 +7,13 @@ from typing import Optional
 import httpx
 from PIL import Image
 from bs4 import BeautifulSoup
+from app.config import settings
+from app.validators import (
+    validate_image_size,
+    validate_video_size,
+    validate_text_length,
+    validate_og_image_size,
+)
 
 
 def _ensure_dir(dest_dir: Path) -> Path:
@@ -13,9 +21,29 @@ def _ensure_dir(dest_dir: Path) -> Path:
     return dest_dir
 
 
+def safe_path(path: Path, base_dir: Path) -> bool:
+    """Ensure path is within allowed directory to prevent path traversal."""
+    try:
+        resolved_path = path.resolve()
+        resolved_base = base_dir.resolve()
+        resolved_path.relative_to(resolved_base)
+        return True
+    except ValueError:
+        return False
+
+
 def process_image(src: Path, dest_dir: Path) -> Optional[Path]:
     """Strip EXIF and convert to WebP. Returns output path or None on failure."""
     try:
+        # Validate path is within allowed directory
+        if not safe_path(src, Path(settings.media_dir)):
+            raise ValueError("Invalid file path")
+
+        # Validate file size
+        file_size = src.stat().st_size
+        if not validate_image_size(file_size):
+            raise ValueError(f"Image size {file_size} exceeds limit {MAX_IMAGE_SIZE}")
+
         _ensure_dir(dest_dir)
         img = Image.open(src)
         img_clean = img.copy()  # drops EXIF
@@ -29,6 +57,15 @@ def process_image(src: Path, dest_dir: Path) -> Optional[Path]:
 def process_video(src: Path, dest_dir: Path) -> Optional[Path]:
     """Strip metadata and re-encode to MP4. Returns output path or None on failure."""
     try:
+        # Validate path is within allowed directory
+        if not safe_path(src, Path(settings.media_dir)):
+            raise ValueError("Invalid file path")
+
+        # Validate file size
+        file_size = src.stat().st_size
+        if not validate_video_size(file_size):
+            raise ValueError(f"Video size {file_size} exceeds limit {MAX_VIDEO_SIZE}")
+
         _ensure_dir(dest_dir)
         out = dest_dir / "media.mp4"
         result = subprocess.run(
@@ -62,7 +99,7 @@ class OGResult:
 def scrape_og(url: str, dest_dir: Optional[Path] = None) -> Optional[OGResult]:
     """Fetch OG tags from URL. Downloads and strips EXIF from OG image if dest_dir given."""
     try:
-        resp = httpx.get(url, timeout=10, follow_redirects=True)
+        resp = httpx.get(url, timeout=10, follow_redirects=True, max_size=10 * 1024 * 1024)
         soup = BeautifulSoup(resp.text, "html.parser")
 
         def og(prop):
@@ -76,6 +113,10 @@ def scrape_og(url: str, dest_dir: Optional[Path] = None) -> Optional[OGResult]:
 
         if image_url and dest_dir:
             img_resp = httpx.get(image_url, timeout=10, follow_redirects=True)
+            # Validate OG image size
+            if not validate_og_image_size(len(img_resp.content)):
+                return None
+
             with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as tmp:
                 raw = Path(tmp.name)
             raw.write_bytes(img_resp.content)

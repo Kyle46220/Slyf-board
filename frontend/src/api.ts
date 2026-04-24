@@ -16,5 +16,16 @@ export async function fetchPost(hash: string): Promise<Post> {
 }
 
 export function createEventSource(): EventSource {
-  return new EventSource(`${BASE}/stream`);
+  const es = new EventSource(`${BASE}/stream`);
+
+  // Auto-reconnect on error with exponential backoff
+  es.onerror = () => {
+    es.close();
+    // Reconnect after 5 seconds
+    setTimeout(() => {
+      createEventSource();
+    }, 5000);
+  };
+
+  return es;
 }

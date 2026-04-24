@@ -3,8 +3,12 @@ import logging
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from app.config import settings
 from app.database import SessionLocal
 from app.models import Post
@@ -12,12 +16,23 @@ from app.routers import posts, admin
 from app.signal_listener import listen
 from app.media import process_image, process_video, scrape_og
 from app.sse import broadcaster
+from app.security import SecurityHeadersMiddleware
+from app.validators import validate_text_length
 
 logger = logging.getLogger(__name__)
+
+limiter = Limiter(key_func=get_remote_address)
+app_state = {"limiter": limiter}
 
 
 async def handle_message(parsed: dict):
     """Ingest a validated, metadata-stripped Signal message into the DB."""
+    # Validate text length
+    body = parsed.get("body")
+    if not validate_text_length(body):
+        logger.warning(f"Post rejected: text length exceeds limit")
+        return
+
     post_hash = str(uuid.uuid4())
     media_dir = Path(settings.media_dir) / post_hash
     content_type = parsed["content_type"]
@@ -51,7 +66,7 @@ async def handle_message(parsed: dict):
         post = Post(
             hash=post_hash,
             content_type=content_type,
-            body=parsed.get("body"),
+            body=body,
             media_path=media_path,
             og_title=og_title,
             og_description=og_description,
@@ -72,6 +87,14 @@ async def lifespan(app: FastAPI):
     task.cancel()
 
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(lifespan=lifespan, state=app_state)
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 app.include_router(posts.router)
 app.include_router(admin.router)
