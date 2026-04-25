@@ -44,12 +44,6 @@ function LazyVideo({ src }: { src: string }) {
 export function PostCard({ post }: Props) {
   const navigate = useNavigate();
 
-  function copyLink() {
-    const url = `${window.location.origin}/#/post/${post.hash}`;
-    void navigator.clipboard.writeText(url);
-    alert("Link copied!");
-  }
-
   function viewPost() {
     navigate(`/post/${post.hash}`);
   }
@@ -84,16 +78,10 @@ export function PostCard({ post }: Props) {
           <ReactMarkdown>{post.body}</ReactMarkdown>
         </div>
       )}
-      <div className="mt-2 flex gap-2">
-        <button onClick={viewPost}
-                className="text-xs text-zinc-500 hover:text-zinc-300">
-          View Post
-        </button>
-        <button onClick={copyLink}
-                className="text-xs text-zinc-500 hover:text-zinc-300">
-          Copy Link
-        </button>
-      </div>
+      <button onClick={viewPost}
+              className="mt-2 text-xs text-zinc-500 hover:text-zinc-300">
+        View Post
+      </button>
     </div>
   );
 }
