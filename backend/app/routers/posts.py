@@ -9,12 +9,20 @@ from app.schemas import PostOut
 from app.sse import broadcaster
 
 router = APIRouter(prefix="/api")
-limiter = Limiter(key_func=lambda r: r.client.host if r.client else "unknown")
+
+# Create limiter with proper key function
+def get_remote_address(request: Request):
+    """Get client IP address for rate limiting."""
+    if request.client:
+        return request.client.host
+    return "unknown"
+
+limiter = Limiter(key_func=get_remote_address)
 
 
 @router.get("/posts", response_model=list[PostOut])
 @limiter.limit("1000/hour")
-async def list_posts(request, db: AsyncSession = Depends(get_db)):
+async def list_posts(request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Post).where(Post.deleted == False).order_by(Post.id.desc())
     )
@@ -23,7 +31,7 @@ async def list_posts(request, db: AsyncSession = Depends(get_db)):
 
 @router.get("/posts/{hash}", response_model=PostOut)
 @limiter.limit("100/hour")
-async def get_post(request, hash: str, db: AsyncSession = Depends(get_db)):
+async def get_post(hash: str, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Post).where(Post.hash == hash, Post.deleted == False)
     )

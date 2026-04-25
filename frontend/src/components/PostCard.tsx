@@ -1,5 +1,6 @@
 import { useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
+import { useNavigate } from "react-router-dom";
 import { type Post } from "../types";
 
 interface Props {
@@ -41,8 +42,16 @@ function LazyVideo({ src }: { src: string }) {
 }
 
 export function PostCard({ post }: Props) {
+  const navigate = useNavigate();
+
   function copyLink() {
-    void navigator.clipboard.writeText(`${window.location.origin}/post/${post.hash}`);
+    const url = `${window.location.origin}/#/post/${post.hash}`;
+    void navigator.clipboard.writeText(url);
+    alert("Link copied!");
+  }
+
+  function viewPost() {
+    navigate(`/post/${post.hash}`);
   }
 
   const mediaUrl = post.media_path
@@ -75,10 +84,16 @@ export function PostCard({ post }: Props) {
           <ReactMarkdown>{post.body}</ReactMarkdown>
         </div>
       )}
-      <button onClick={copyLink}
-              className="mt-2 text-xs text-zinc-500 hover:text-zinc-300">
-        Copy Link
-      </button>
+      <div className="mt-2 flex gap-2">
+        <button onClick={viewPost}
+                className="text-xs text-zinc-500 hover:text-zinc-300">
+          View Post
+        </button>
+        <button onClick={copyLink}
+                className="text-xs text-zinc-500 hover:text-zinc-300">
+          Copy Link
+        </button>
+      </div>
     </div>
   );
 }
