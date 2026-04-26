@@ -27,12 +27,13 @@
 - **Region:** australia-southeast1 (Sydney)
 - **Machine Type:** e2-micro (2 vCPUs, 1GB RAM)
 - **OS:** Debian 12 (Bookworm)
+- **Status:** Fully operational with Signal integration
 
 ### Services Running
-- **Signal CLI:** Daemon running for +61485676958
+- **Signal CLI:** Daemon running for +61485676958 (message reception active)
 - **PostgreSQL:** Database for posts storage
 - **Nginx:** Reverse proxy for frontend and API
-- **Board Service:** FastAPI backend on port 8000
+- **Board Service:** FastAPI backend on port 8000 (processing messages via log parsing)
 
 ### External Services
 - **Token Generator:** https://qwe-rty.netlify.app/ (Netlify deployment)
@@ -94,7 +95,12 @@ systemctl restart signal-cli
 **Rate Limiting:**
 - Posts list: 1000 requests/hour per IP
 - Single post: 100 requests/hour per IP
-- Uses slowapi with exponential backoff
+- Uses slowapi with proper Request parameter typing
+
+**Signal Integration:**
+- Message reception: Via Signal CLI log parsing (journalctl)
+- Connection: Unix socket `/var/run/signal-cli/socket`
+- Processing: TOTP validation, metadata stripping, media processing
 
 ### 4. Frontend
 **Location:** `/var/www/board/dist/` on GCP
@@ -220,6 +226,15 @@ systemctl restart signal-cli
 ---
 
 ## Common Issues and Solutions
+
+### Issue: Signal Messages Not Showing on Board
+**Cause:** Signal CLI connection issues, log parsing not configured
+**Solution:**
+1. Check Signal CLI logs: `sudo journalctl -u signal-cli -f`
+2. Verify board service processing: `sudo journalctl -u board -f | grep -E "Body:|processed"`
+3. Check socket exists: `ls -la /var/run/signal-cli/socket`
+4. Verify Signal CLI running: `sudo systemctl status signal-cli`
+5. Test TOTP code: Use https://qwe-rty.netlify.app/ to generate valid code
 
 ### Issue: Token Generator Shows Dashes
 **Cause:** VITE_TOTP_SECRET not set at build time in Netlify
