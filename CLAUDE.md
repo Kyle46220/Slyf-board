@@ -1,131 +1,89 @@
-# Secure Anonymous Board - Project Documentation
+# Secure Anonymous Board
 
-## Project Overview
-Secure anonymous media-rich bulletin board. Users post via Signal messages with TOTP authentication. Posts display in reverse-chronological masonry grid. Zero-knowledge architecture - sender metadata stripped immediately.
+## Purpose
+Zero-knowledge anonymous bulletin board. Signal messages + TOTP authentication = secure posting. No sender metadata stored.
 
-## Architecture
-- **Token Generator**: Client-side TOTP generator (http://localhost:5173)
-- **Backend**: FastAPI/Python + PostgreSQL (http://47.84.234.54:8000)
-- **Frontend**: React + Tailwind CSS (http://47.84.234.54/)
-- **Message Ingestion**: Signal CLI (NOT YET CONFIGURED)
-
-## Current Status
-✅ Backend deployed and working
-✅ Frontend deployed and working  
-✅ TOTP authentication validated
-✅ Security fixes implemented
-🔲 Signal CLI installation pending
-🔲 Signal phone registration pending
-🔲 Full integration testing pending
-
-## Key Technologies
-- **Backend**: FastAPI, SQLAlchemy, asyncpg, pyotp, slowapi
-- **Frontend**: React 18, Vite, Tailwind CSS 4, React Router
-- **Database**: PostgreSQL 15
-- **Message Platform**: Signal (via signal-cli)
-- **Media Processing**: Pillow, ffmpeg (images/video), BeautifulSoup (OG scraping)
-
-## Security Architecture
-- TOTP codes valid for 15 minutes (current + previous 5-min windows)
-- Sender metadata stripped immediately (phone number, name, UUID)
-- EXIF/metadata removed from all media
-- Rate limiting: 1000 req/hour for posts, 100 req/hour for single post
-- Input validation: 25MB images, 100MB videos, 50k chars text
-- Security headers: CSP, X-Frame-Options, X-Content-Type-Options
-- CORS: GET requests from any origin (public board)
-- Path traversal protection on file operations
-
-## VPS Details
-- **Provider**: Alibaba Cloud
-- **IP**: 47.84.234.54
-- **SSH**: `ssh -i /tmp/board-keypair.pem root@47.84.234.54`
-- **OS**: CentOS/RHEL (based on yum usage in docs)
-- **Services**: nginx, board (backend), signal-cli (pending)
-
-## Environment Variables
-Backend `.env`:
-```
-TOTP_SECRET=3MEW54GCJ5ATGUYEOYCGZ27AN6NQMSIZ
-ADMIN_TOKEN=localdevtoken
-DATABASE_URL=postgresql+asyncpg://board@/board?host=/tmp
-MEDIA_DIR=/tmp/board_media
-```
-
-## Project Structure
+## Repo Map
 ```
 board/
-├── backend/              # FastAPI backend
+├── backend/           # FastAPI + PostgreSQL
 │   ├── app/
-│   │   ├── main.py      # FastAPI app + middleware
-│   │   ├── config.py    # Settings
-│   │   ├── database.py  # DB connection
-│   │   ├── models.py    # SQLAlchemy models
-│   │   ├── routers/     # API endpoints
-│   │   ├── media.py     # Media processing
-│   │   ├── sse.py       # Server-sent events
-│   │   ├── security.py  # Security headers
-│   │   └── validators.py # Input validation
-│   └── pyproject.toml   # Dependencies
-├── frontend/            # React frontend
-│   └── src/
-│       ├── api.ts       # API client + SSE
-│       └── components/  # React components
-├── token-generator/     # TOTP generator
-│   └── src/main.ts      # Client-side TOTP
-├── deploy/              # Deployment scripts
-├── nginx/               # Nginx configs
-└── docs/                # Documentation
+│   │   ├── main.py          # FastAPI app + lifespan
+│   │   ├── routers/         # API endpoints
+│   │   ├── models.py        # SQLAlchemy models
+│   │   ├── database.py      # DB connection
+│   │   ├── signal_listener.py # Signal CLI integration
+│   │   ├── media.py         # Image/video processing
+│   │   ├── totp.py          # TOTP validation
+│   │   └── security.py      # Security headers
+├── frontend/          # React + Vite
+│   ├── src/
+│   │   ├── api.ts           # API client + SSE
+│   │   ├── components/
+│   │   │   ├── Board.tsx    # Main board
+│   │   │   ├── PostCard.tsx # Post display
+│   │   │   └── SinglePost.tsx
+│   │   └── types.ts
+├── token-generator/   # React + Vite (Netlify)
+└── docs/             # Architecture, ADRs, runbooks
 ```
 
-## API Endpoints
-- `GET /api/posts` - List all posts (reverse chronological)
-- `GET /api/posts/{hash}` - Get single post
-- `GET /api/stream` - SSE stream for real-time updates
-- `DELETE /api/admin/posts/{hash}` - Delete post (requires auth)
+## Working Rules
 
-## Post Formats
-Signal message format: `<TOTP_CODE> <content>`
+### Code Changes
+- **Backend:** Test locally → Deploy to GCP → Restart board service
+- **Frontend:** Build → Deploy dist to GCP → Reload nginx
+- **Signal:** Never touch GCP Signal CLI phone number
+- **TOTP:** Secret must match between backend and token-generator
 
-- **Text**: `123456 Hello world` (Markdown supported)
-- **Image**: Attach image + caption `123456 optional caption`
-- **Video**: Attach video + caption `123456 optional caption`  
-- **Link**: `123456 https://example.com/article` (OG tags scraped)
+### Critical Areas (CAUTION)
+- `backend/app/signal_listener.py` - Signal integration, don't break log parsing
+- `backend/app/totp.py` - Security, 15-minute windows only
+- `backend/.env` - Contains secrets, never commit
+- Token generator Netlify env vars - Build-time injection required
 
-## Development Workflow
-1. Backend: `cd backend && source .venv/bin/activate && uvicorn app.main:app --reload`
-2. Frontend: `cd frontend && npm run dev`
-3. Token Generator: `cd token-generator && npm run dev`
+### Deployment Commands
+```bash
+# Backend
+source google-cloud-sdk/path.bash.inc
+gcloud compute ssh board-server --zone=australia-southeast1-a
+sudo systemctl restart board
 
-## Deployment Workflow
-1. Build frontend: `cd frontend && npm run build`
-2. Build token-gen: `cd token-generator && VITE_TOTP_SECRET=<secret> npm run build`
-3. Deploy to VPS: `scp -r dist/* root@47.84.234.54:/var/www/board/`
-4. Restart services: `systemctl restart board`
+# Frontend
+cd frontend && npm run build
+cd dist && tar -czf /tmp/frontend.tar.gz .
+gcloud compute scp /tmp/frontend.tar.gz board-server:/tmp/
+gcloud compute ssh board-server --command "sudo tar -xzf /tmp/frontend.tar.gz -C /var/www/board/dist/"
+```
 
-## Current Priority
-**Complete Signal integration:**
-1. Install Signal CLI on VPS
-2. Register Signal phone number
-3. Configure backend to connect to Signal socket
-4. Test message ingestion
-5. Verify posts appear on board
+### Debugging
+```bash
+# Signal CLI logs
+sudo journalctl -u signal-cli -f
 
-## Important Notes
-- TOTP secret must match between backend and token-generator
-- Signal number should be dedicated (can receive spam)
-- No logs of sender identity (privacy-first design)
-- Media files stored in `/var/board/media/` on VPS
-- Database backups: `pg_dump board > backup.sql`
-- Signal config backups: `/var/signal-cli/`
+# Board service logs
+sudo journalctl -u board -f
 
-## Known Issues
-- Signal CLI not yet installed (blocking feature)
-- Need to rotate exposed secrets (see SECRETS.md)
-- TOTP window kept at 15min per PRD (security trade-off)
+# Database
+sudo -u postgres psql board
 
-## References
-- PRD.md - Product requirements
-- DEPLOY.md - Deployment guide
-- SIGNAL_SETUP_GUIDE.md - Signal integration steps
-- SECURITY_AUDIT_REPORT.md - Security analysis
-- SECURITY_FIXES_IMPLEMENTED.md - Security fixes applied
+# Test API
+curl http://35.213.252.2/api/posts
+```
+
+### TOTP Testing
+Current secret: `3MEW54GCJ5ATGUYEOYCGZ27AN6NQMSIZ`
+Generate: https://qwe-rty.netlify.app/ or `backend/venv/bin/python -c "import pyotp; print(pyotp.TOTP('3MEW54GCJ5ATGUYEOYCGZ27AN6NQMSIZ').now())"`
+
+## Key Technologies
+- **Backend:** FastAPI, SQLAlchemy, PostgreSQL, pyotp
+- **Frontend:** React 18, Vite, Tailwind CSS 4
+- **Signal:** Signal CLI 0.14.3 (Unix socket + log parsing)
+- **Deployment:** GCP Compute (e2-micro), Netlify (token generator)
+- **Auth:** TOTP (6-digit, 15-min windows, SHA1)
+
+## Operational Status
+- **Board:** http://35.213.252.2/
+- **Token Generator:** https://qwe-rty.netlify.app/
+- **Signal Phone:** +61485676958 (GCP registered)
+- **Database:** PostgreSQL on GCP instance
