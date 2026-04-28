@@ -4,10 +4,10 @@ After=network.target postgresql.service signal-cli.service
 
 [Service]
 Type=simple
-User=www-data
-WorkingDirectory=/opt/board/backend
-EnvironmentFile=/etc/board.env
-ExecStart=/opt/board/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+User=kyle46220
+WorkingDirectory=/opt/backend
+EnvironmentFile=/opt/backend/.env
+ExecStart=/opt/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips='*'
 Restart=on-failure
 RestartSec=5
 

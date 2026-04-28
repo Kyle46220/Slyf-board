@@ -7,25 +7,10 @@ Zero-knowledge anonymous bulletin board. Signal messages + TOTP authentication =
 ```
 board/
 ├── backend/           # FastAPI + PostgreSQL
-│   ├── app/
-│   │   ├── main.py          # FastAPI app + lifespan
-│   │   ├── routers/         # API endpoints
-│   │   ├── models.py        # SQLAlchemy models
-│   │   ├── database.py      # DB connection
-│   │   ├── signal_listener.py # Signal CLI integration
-│   │   ├── media.py         # Image/video processing
-│   │   ├── totp.py          # TOTP validation
-│   │   └── security.py      # Security headers
 ├── frontend/          # React + Vite
-│   ├── src/
-│   │   ├── api.ts           # API client + SSE
-│   │   ├── components/
-│   │   │   ├── Board.tsx    # Main board
-│   │   │   ├── PostCard.tsx # Post display
-│   │   │   └── SinglePost.tsx
-│   │   └── types.ts
 ├── token-generator/   # React + Vite (Netlify)
-└── docs/             # Architecture, ADRs, runbooks
+├── .claude/          # Skills, hooks, configuration
+└── docs/             # Current operational documentation
 ```
 
 ## Working Rules
@@ -42,39 +27,6 @@ board/
 - `backend/.env` - Contains secrets, never commit
 - Token generator Netlify env vars - Build-time injection required
 
-### Deployment Commands
-```bash
-# Backend
-source google-cloud-sdk/path.bash.inc
-gcloud compute ssh board-server --zone=australia-southeast1-a
-sudo systemctl restart board
-
-# Frontend
-cd frontend && npm run build
-cd dist && tar -czf /tmp/frontend.tar.gz .
-gcloud compute scp /tmp/frontend.tar.gz board-server:/tmp/
-gcloud compute ssh board-server --command "sudo tar -xzf /tmp/frontend.tar.gz -C /var/www/board/dist/"
-```
-
-### Debugging
-```bash
-# Signal CLI logs
-sudo journalctl -u signal-cli -f
-
-# Board service logs
-sudo journalctl -u board -f
-
-# Database
-sudo -u postgres psql board
-
-# Test API
-curl http://35.213.252.2/api/posts
-```
-
-### TOTP Testing
-Current secret: `3MEW54GCJ5ATGUYEOYCGZ27AN6NQMSIZ`
-Generate: https://qwe-rty.netlify.app/ or `backend/venv/bin/python -c "import pyotp; print(pyotp.TOTP('3MEW54GCJ5ATGUYEOYCGZ27AN6NQMSIZ').now())"`
-
 ## Key Technologies
 - **Backend:** FastAPI, SQLAlchemy, PostgreSQL, pyotp
 - **Frontend:** React 18, Vite, Tailwind CSS 4
@@ -82,8 +34,16 @@ Generate: https://qwe-rty.netlify.app/ or `backend/venv/bin/python -c "import py
 - **Deployment:** GCP Compute (e2-micro), Netlify (token generator)
 - **Auth:** TOTP (6-digit, 15-min windows, SHA1)
 
-## Operational Status
+## Detailed Documentation
+For complete project documentation, deployment details, troubleshooting procedures, and operational status, see **[AGENTS.md](AGENTS.md)**.
+
+## Quick Access
 - **Board:** http://35.213.252.2/
 - **Token Generator:** https://qwe-rty.netlify.app/
-- **Signal Phone:** +61485676958 (GCP registered)
-- **Database:** PostgreSQL on GCP instance
+- **Signal Phone:** +61485676958
+
+## Reusable Workflows
+Use `.claude/skills/` for expert guidance:
+- `debug-signal.md` - Signal integration troubleshooting
+- `deploy-changes.md` - Deployment procedures
+- `test-totp.md` - TOTP authentication testing

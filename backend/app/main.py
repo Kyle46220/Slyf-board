@@ -45,6 +45,7 @@ async def handle_message(parsed: dict):
             out = process_image(src, media_dir)
             media_path = str(out) if out else None
             if not media_path:
+                logger.warning(f"Image processing failed for post {post_hash}. Falling back to text.")
                 content_type = "text"
 
     elif content_type == "video" and parsed.get("attachments"):
@@ -53,6 +54,7 @@ async def handle_message(parsed: dict):
             out = process_video(src, media_dir)
             media_path = str(out) if out else None
             if not media_path:
+                logger.warning(f"Video processing failed for post {post_hash}. Falling back to text.")
                 content_type = "text"
 
     elif content_type == "link" and parsed.get("body"):

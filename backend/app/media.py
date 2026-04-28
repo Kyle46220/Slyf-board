@@ -13,6 +13,8 @@ from app.validators import (
     validate_video_size,
     validate_text_length,
     validate_og_image_size,
+    MAX_IMAGE_SIZE,
+    MAX_VIDEO_SIZE,
 )
 
 
@@ -35,9 +37,9 @@ def safe_path(path: Path, base_dir: Path) -> bool:
 def process_image(src: Path, dest_dir: Path) -> Optional[Path]:
     """Strip EXIF and convert to WebP. Returns output path or None on failure."""
     try:
-        # Validate path is within allowed directory
-        if not safe_path(src, Path(settings.media_dir)):
-            raise ValueError("Invalid file path")
+        # Validate destination will be in allowed directory
+        if not safe_path(dest_dir, Path(settings.media_dir)):
+            raise ValueError("Invalid destination file path")
 
         # Validate file size
         file_size = src.stat().st_size
@@ -57,9 +59,9 @@ def process_image(src: Path, dest_dir: Path) -> Optional[Path]:
 def process_video(src: Path, dest_dir: Path) -> Optional[Path]:
     """Strip metadata and re-encode to MP4. Returns output path or None on failure."""
     try:
-        # Validate path is within allowed directory
-        if not safe_path(src, Path(settings.media_dir)):
-            raise ValueError("Invalid file path")
+        # Validate destination will be in allowed directory
+        if not safe_path(dest_dir, Path(settings.media_dir)):
+            raise ValueError("Invalid destination file path")
 
         # Validate file size
         file_size = src.stat().st_size
