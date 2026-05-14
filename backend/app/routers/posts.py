@@ -1,10 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from slowapi import Limiter
-from app.database import get_db
-from app.models import Post
+from app.d1_client import d1
 from app.schemas import PostOut
 from app.sse import broadcaster
 
@@ -22,23 +19,20 @@ limiter = Limiter(key_func=get_remote_address)
 
 @router.get("/posts", response_model=list[PostOut])
 @limiter.limit("1000/hour")
-async def list_posts(request: Request, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Post).where(Post.deleted == False).order_by(Post.id.desc())
-    )
-    return result.scalars().all()
+async def list_posts(request: Request):
+    query = "SELECT * FROM posts WHERE deleted = 0 ORDER BY id DESC"
+    results = await d1.execute(query)
+    return results
 
 
 @router.get("/posts/{hash}", response_model=PostOut)
 @limiter.limit("100/hour")
-async def get_post(hash: str, request: Request, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(
-        select(Post).where(Post.hash == hash, Post.deleted == False)
-    )
-    post = result.scalar_one_or_none()
-    if post is None:
+async def get_post(hash: str, request: Request):
+    query = "SELECT * FROM posts WHERE hash = ? AND deleted = 0"
+    results = await d1.execute(query, [hash])
+    if not results:
         raise HTTPException(status_code=404, detail="Post not found")
-    return post
+    return results[0]
 
 
 @router.get("/stream")

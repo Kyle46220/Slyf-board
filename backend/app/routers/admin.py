@@ -1,11 +1,8 @@
 import shutil
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Header
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
-from app.database import get_db
-from app.models import Post
+from app.d1_client import d1
 from app.sse import broadcaster
 
 router = APIRouter(prefix="/api/admin")
@@ -20,23 +17,23 @@ async def require_admin(authorization: str | None = Header(default=None)):
 
 
 @router.delete("/posts/{hash}", dependencies=[Depends(require_admin)])
-async def delete_post(hash: str, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Post).where(Post.hash == hash))
-    post = result.scalar_one_or_none()
-    if post is None:
+async def delete_post(hash: str):
+    query = "SELECT id FROM posts WHERE hash = ?"
+    results = await d1.execute(query, [hash])
+    if not results:
         raise HTTPException(status_code=404, detail="Post not found")
 
     media_dir = Path(settings.media_dir) / hash
     if media_dir.exists():
         shutil.rmtree(media_dir)
 
-    post.deleted = True
-    post.body = None
-    post.media_path = None
-    post.og_title = None
-    post.og_description = None
-    post.og_image_path = None
-    await db.commit()
+    update_query = """
+        UPDATE posts 
+        SET deleted = 1, body = NULL, media_path = NULL, 
+            og_title = NULL, og_description = NULL, og_image_path = NULL 
+        WHERE hash = ?
+    """
+    await d1.execute(update_query, [hash])
 
     await broadcaster.publish({"type": "delete", "hash": hash})
     return {"ok": True}

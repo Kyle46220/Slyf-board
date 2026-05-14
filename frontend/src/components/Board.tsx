@@ -98,11 +98,8 @@ export function Board() {
   // Show loading state
   if (loading) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-white">
-        <div className="text-center">
-          <p className="text-xl mb-2">Loading board...</p>
-          <p className="text-sm text-zinc-400">Please wait while we connect to the server</p>
-        </div>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="animate-spin h-6 w-6 border-2 border-black border-t-transparent rounded-full"></div>
       </div>
     );
   }
@@ -110,23 +107,15 @@ export function Board() {
   // Show error state
   if (error) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-white">
-        <div className="text-center max-w-md p-6 border border-zinc-700 rounded-lg">
-          <h2 className="text-2xl font-bold mb-4 text-red-400">Connection Error</h2>
-          <p className="text-zinc-300 mb-4">{error}</p>
-          <div className="space-y-2 text-sm">
-            <p className="text-zinc-400">
-              <strong>Status:</strong> {sseConnected ? "Connected" : "Disconnected"}
-            </p>
-            <p className="text-zinc-400">
-              <strong>API:</strong> <code className="bg-zinc-800 px-2 py-1 rounded">{window.location.origin}/api/posts</code>
-            </p>
-          </div>
+      <div className="min-h-screen bg-white flex items-center justify-center">
+        <div className="text-center p-8 max-w-sm">
+          <h2 className="text-lg font-medium mb-2">Connection Issue</h2>
+          <p className="text-sm text-zinc-500 mb-6">{error}</p>
           <button
             onClick={() => window.location.reload()}
-            className="mt-6 px-4 py-2 bg-zinc-700 hover:bg-zinc-600 rounded transition-colors"
+            className="text-sm font-medium underline underline-offset-4 hover:text-zinc-600 transition-colors"
           >
-            Refresh Page
+            Retry
           </button>
         </div>
       </div>
@@ -136,14 +125,9 @@ export function Board() {
   // Show empty state
   if (posts.length === 0) {
     return (
-      <div className="min-h-screen bg-zinc-950 flex items-center justify-center text-white">
+      <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-center">
-          <h2 className="text-3xl font-bold mb-4">No posts yet</h2>
-          <p className="text-zinc-400 mb-4">The board is empty</p>
-          <div className="text-sm text-zinc-500">
-            <p>Posts will appear here once users start posting via Signal</p>
-            <p className="mt-2">Connection status: {sseConnected ? "✓ Connected" : "⚠ Disconnected"}</p>
-          </div>
+          <h2 className="text-lg font-medium text-zinc-400">Board Empty</h2>
         </div>
       </div>
     );
@@ -151,8 +135,10 @@ export function Board() {
 
   // Show posts
   return (
-    <div className="masonry p-4">
-      {posts.map((post) => <PostCard key={post.hash} post={post} />)}
+    <div className="min-h-screen bg-white">
+      <div className="masonry p-6">
+        {posts.map((post) => <PostCard key={post.hash} post={post} />)}
+      </div>
     </div>
   );
 }

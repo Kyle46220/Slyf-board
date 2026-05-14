@@ -1,0 +1,14 @@
+{
+  "tasks": [
+    {
+      "id": "SIGNAL-001",
+      "title": "Register Signal CLI with phone number +61485676958",
+      "acceptanceCriteria": [
+        "Exit code 0 when running: ssh -i /tmp/board-keypair.pem root@47.84.234.54 'sudo -u signal signal-cli --config /var/signal-cli receive --timeout 30'",
+        "Command output shows successful connection to Signal servers",
+        "No registration or authentication errors in output"
+      ],
+      "passes": false
+    }
+  ]
+}

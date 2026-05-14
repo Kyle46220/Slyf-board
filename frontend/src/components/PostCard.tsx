@@ -44,44 +44,75 @@ function LazyVideo({ src }: { src: string }) {
 export function PostCard({ post }: Props) {
   const navigate = useNavigate();
 
-  function viewPost() {
-    navigate(`/post/${post.hash}`);
-  }
-
   const mediaUrl = post.media_path
-    ? `/media/${post.hash}/${post.content_type === "video" ? "media.mp4" : "media.webp"}`
+    ? post.media_path.startsWith('http') 
+      ? post.media_path 
+      : `/media/${post.hash}/${post.content_type === "video" ? "media.mp4" : "media.webp"}`
     : null;
 
+  const RAINBOW_COLORS = [
+    '#FF0000', // Red
+    '#FF7F00', // Orange
+    '#FFFF00', // Yellow
+    '#00FF00', // Green
+    '#0000FF', // Blue
+    '#4B0082', // Indigo
+    '#8B00FF', // Violet
+  ];
+
+  // Stable random color based on hash
+  const colorIndex = Math.abs(post.hash.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)) % RAINBOW_COLORS.length;
+  const rainbowColor = RAINBOW_COLORS[colorIndex];
+
+  const cardBase =
+    "break-inside-avoid mb-6 rounded-lg p-4 text-black cursor-pointer transition-all duration-200 hover:shadow-md border-[1.5px]";
+  const cardStyle = {
+    background: '#ffffff',
+    borderColor: rainbowColor,
+  };
+
+  // Link posts: entire card is an external anchor
+  if (post.content_type === "link") {
+    return (
+      <a
+        href={post.body ?? "#"}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`${cardBase} block`}
+        style={cardStyle}
+      >
+        {post.og_image_path && (
+          <LazyImage src={post.og_image_path.startsWith('http') ? post.og_image_path : `/media/${post.hash}/og.webp`} alt="link preview" />
+        )}
+        {post.og_title && <p className="font-semibold mt-3 text-sm">{post.og_title}</p>}
+        {post.og_description && (
+          <p className="text-xs text-zinc-500 mt-1 line-clamp-2">{post.og_description}</p>
+        )}
+        {post.body && (
+          <p className="text-[10px] text-zinc-400 mt-2 truncate">{post.body}</p>
+        )}
+      </a>
+    );
+  }
+
+  // Image / video / text posts: click navigates to single-post view
   return (
-    <div className="break-inside-avoid mb-4 bg-zinc-900 rounded-lg p-3 text-white">
+    <div
+      className={cardBase}
+      style={cardStyle}
+      onClick={() => navigate(`/post/${post.hash}`)}
+    >
       {post.content_type === "image" && mediaUrl && (
         <LazyImage src={mediaUrl} alt="post image" />
       )}
       {post.content_type === "video" && mediaUrl && (
         <LazyVideo src={mediaUrl} />
       )}
-      {post.content_type === "link" && (
-        <a href={post.body ?? "#"} target="_blank" rel="noopener noreferrer"
-           className="block border border-zinc-700 rounded p-2 hover:bg-zinc-800">
-          {post.og_image_path && (
-            <LazyImage src={`/media/${post.hash}/og.webp`} alt="link preview" />
-          )}
-          {post.og_title && <p className="font-bold mt-1">{post.og_title}</p>}
-          {post.og_description && (
-            <p className="text-sm text-zinc-400 mt-1">{post.og_description}</p>
-          )}
-          <p className="text-xs text-zinc-500 mt-1 truncate">{post.body}</p>
-        </a>
-      )}
-      {post.body && post.content_type !== "link" && (
-        <div className="prose prose-invert prose-sm mt-2">
+      {post.body && (
+        <div className="prose prose-sm text-zinc-800 max-w-none prose-p:my-1 prose-a:text-blue-600 prose-a:underline break-words">
           <ReactMarkdown>{post.body}</ReactMarkdown>
         </div>
       )}
-      <button onClick={viewPost}
-              className="mt-2 text-xs text-zinc-500 hover:text-zinc-300">
-        View Post
-      </button>
     </div>
   );
 }

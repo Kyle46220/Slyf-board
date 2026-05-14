@@ -9,19 +9,40 @@ from app.totp import verify_totp
 
 logger = logging.getLogger(__name__)
 
-URL_RE = re.compile(r"^https?://\S+$")
+URL_RE = re.compile(r"https?://\S+")
 
 
 def parse_message(text: str, attachments: list) -> Optional[dict]:
     """Extract TOTP and content from a raw Signal message. Returns None if malformed."""
-    if not text:
+    text = text.strip() if text else ""
+    if not text and not attachments:
         return None
-    parts = text.strip().split(" ", 1)
-    code = parts[0]
-    if len(code) != 6 or not code.isdigit():
-        return None
-    body = parts[1].strip() if len(parts) > 1 else None
 
+    if settings.bypass_totp:
+        parts = text.split(" ", 1)
+        code = parts[0] if parts else ""
+        if len(code) == 6 and code.isdigit():
+            extracted_code = code
+            body = parts[1].strip() if len(parts) > 1 else None
+        else:
+            extracted_code = "BYPASS"
+            if text.startswith("BYPASS "):
+                body = text[7:].strip()
+            elif text == "BYPASS":
+                body = None
+            else:
+                body = text if text else None
+    else:
+        if not text:
+            return None
+        parts = text.split(" ", 1)
+        code = parts[0]
+        if len(code) != 6 or not code.isdigit():
+            return None
+        extracted_code = code
+        body = parts[1].strip() if len(parts) > 1 else None
+
+    # Determine content type
     if attachments:
         first = attachments[0].get("content_type", "")
         if first.startswith("image/"):
@@ -30,13 +51,14 @@ def parse_message(text: str, attachments: list) -> Optional[dict]:
             content_type = "video"
         else:
             content_type = "text"
-    elif body and URL_RE.match(body):
+    elif body and URL_RE.search(body):
+        # Treat as link if it contains a URL and no attachments
         content_type = "link"
     else:
         content_type = "text"
 
     return {
-        "totp": code,
+        "totp": extracted_code,
         "body": body,
         "content_type": content_type,
         "attachments": attachments,
@@ -128,7 +150,7 @@ async def listen(on_message, signal_socket_path: str = "/var/run/signal-cli/sock
                                     if parsed is None:
                                         logger.warning(f"Failed to parse message: {text[:100]}")
                                         continue
-                                    if not verify_totp(parsed["totp"], settings.totp_secret):
+                                    if not settings.bypass_totp and not verify_totp(parsed["totp"], settings.totp_secret):
                                         logger.warning(f"Invalid TOTP code: {parsed['totp']}")
                                         continue
 
@@ -183,7 +205,7 @@ async def parse_signal_cli_logs(on_message):
         "journalctl",
         "-u", "signal-cli",
         "-f",  # Follow logs
-        "--no-tail",  # Don't show old lines, only new ones
+        "-n", "0",  # Don't show old lines, only new ones
         "-o", "cat"  # Output raw log lines
     ]
 
@@ -196,102 +218,173 @@ async def parse_signal_cli_logs(on_message):
 
         logger.info("Started journalctl process for Signal CLI logs")
 
-        # Parse log lines
-        async for line in process.stdout:
-            line_str = line.decode().strip()
+        current_envelope_lines = []
 
-            # Look for message body (TOTP code)
-            if "Body:" in line_str:
+        async def flush_envelope():
+            nonlocal current_envelope_lines
+            if not current_envelope_lines:
+                return
+                
+            lines = current_envelope_lines
+            current_envelope_lines = []
+
+            body = ""
+            attachments_files = []
+            timestamp = str(hash("".join(lines)))
+            seen_previews = False
+            sender = None
+            is_group = False
+            has_native_mention = False
+            in_mentions = False
+            in_body = False
+
+            for l in lines:
+                l_strip = l.strip()
+                if "Message timestamp:" in l:
+                    in_body = False
+                    timestamp = l.split(":", 1)[1].strip()
+                elif l.startswith("Body:"):
+                    in_body = True
+                    body = l.split(":", 1)[1].strip()
+                elif l_strip in ["Previews:", "Mentions:"] or l_strip.startswith("Group info:") or l_strip.startswith("Envelope from:") or "Stored plaintext in:" in l:
+                    in_body = False
+                    if l_strip == "Previews:": seen_previews = True
+                    elif l_strip == "Mentions:": in_mentions = True
+                    elif l_strip.startswith("Group info:"): is_group = True
+                    elif "Stored plaintext in:" in l:
+                        file_path = l.split("Stored plaintext in:", 1)[1].strip()
+                        attachments_files.append(file_path)
+                elif in_body:
+                    # Strip Signal metadata footers that sometimes appear in logs
+                    if "(with profile key)" in l_strip or l_strip == "Data message":
+                        in_body = False
+                        continue
+                    # Append multi-line body content
+                    if body:
+                        body += "\n" + l # Keep original line for spacing, but strip later
+                    else:
+                        body = l
+                elif in_mentions and l_strip.startswith("-"):
+                    if "+61485676958" in l or "f074c34d-7706-44e6-9a24-b71c2b4cf673" in l:
+                        has_native_mention = True
+
+            if body:
+                body = body.strip()
+
+            if is_group:
+                # Accept if they use the hashtag or natively tag the bot
+                if "@slyfebot.21" not in body.lower() and not has_native_mention:
+                    return
+                # Strip the mention from the body before processing
+                body = re.sub(r'(?i)@slyfebot\.21\s*', '', body).strip()
+                # Strip native mention replacement characters if present
+                body = body.replace('\ufffc', '').strip()
+
+            if not body and not attachments_files:
+                return
+
+            if timestamp in processed_hashes:
+                return
+            processed_hashes.add(timestamp)
+
+            attachments = []
+            for att_file in attachments_files:
                 try:
-                    # Extract TOTP code (6 digits) from Body: line
-                    totp_match = re.search(r"Body:\s*(\d{6})", line_str)
-                    if not totp_match:
-                        continue
-
-                    totp_code = totp_match.group(1)
-
-                    # Read the next line for the actual message body
-                    message_body = ""
-                    try:
-                        next_line = await asyncio.wait_for(process.stdout.readline(), timeout=0.5)
-                        next_line_str = next_line.decode().strip()
-                        # Check if this is the actual message body (not metadata)
-                        if next_line_str and not next_line_str.startswith("With") and not next_line_str.startswith("Attachments") and not next_line_str.startswith("Server timestamps"):
-                            message_body = next_line_str
-                            logger.info(f"Found message body: {message_body}")
-                    except asyncio.TimeoutError:
-                        pass  # No body line, that's okay
-
-                    # Combine TOTP and body for parsing
-                    full_message = f"{totp_code} {message_body}".strip()
-
-                    # Create a unique hash for this message (using timestamp + partial content)
-                    msg_hash = f"{hash(line_str)}_{totp_code}"
-                    if msg_hash in processed_hashes:
-                        continue
-                    processed_hashes.add(msg_hash)
-
-                    # Look for attachment info in next few lines
-                    attachment_file = None
-
-                    # Read more lines to check for attachments (longer timeout)
-                    for _ in range(20):
-                        try:
-                            next_line = await asyncio.wait_for(process.stdout.readline(), timeout=0.5)
-                            next_line_str = next_line.decode().strip()
-
-                            # Check for stored attachment path
-                            if "Stored plaintext in:" in next_line_str:
-                                attachment_match = re.search(r"Stored plaintext in:\s*(\/[^\s]+)", next_line_str)
-                                if attachment_match:
-                                    attachment_file = attachment_match.group(1)
-                                    logger.info(f"Found attachment: {attachment_file}")
-
-                            # Stop on new message envelope
-                            if "Envelope from:" in next_line_str:
-                                break
-                        except asyncio.TimeoutError:
-                            # Timeout waiting for next line, proceed with current message
-                            break
-
-                    # Create attachments list
-                    attachments = []
-                    if attachment_file:
-                        # Copy attachment to temp directory for processing
-                        try:
-                            src_path = Path(attachment_file)
-                            if src_path.exists():
-                                # Create unique temp filename
-                                temp_file = temp_media_dir / f"{msg_hash}_{src_path.name}"
-                                shutil.copy2(src_path, temp_file)
-
-                                content_type = "image/jpeg" if attachment_file.endswith(".jpg") or attachment_file.endswith(".jpeg") else "unknown"
-                                attachments.append({
-                                    "content_type": content_type,
-                                    "filename": str(temp_file)
-                                })
-                                logger.info(f"Copied attachment to temp dir: {temp_file}")
-                        except Exception as e:
-                            logger.error(f"Failed to copy attachment: {e}")
-
-                    # Parse the message
-                    parsed = parse_message(full_message, attachments)
-                    if parsed is None:
-                        logger.warning(f"Failed to parse message from logs: {totp_code}")
-                        continue
-
-                    # Verify TOTP
-                    if not verify_totp(parsed["totp"], settings.totp_secret):
-                        logger.warning(f"Invalid TOTP code from logs: {parsed['totp']}")
-                        continue
-
-                    # Process the message
-                    await on_message(parsed)
-                    logger.info(f"Message from logs processed: {totp_code} - {message_body[:30] if message_body else '[no body]'}")
-
+                    src_path = Path(att_file)
+                    if src_path.exists():
+                        temp_file = temp_media_dir / f"{timestamp}_{src_path.name}"
+                        import shutil
+                        shutil.copy2(src_path, temp_file)
+                        
+                        ext = src_path.suffix.lower()
+                        if ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                            content_type = "image/" + ext.strip('.')
+                        elif ext in ['.mp4', '.mov', '.avi', '.webm']:
+                            content_type = "video/" + ext.strip('.')
+                        else:
+                            content_type = "unknown"
+                            
+                        attachments.append({
+                            "content_type": content_type,
+                            "filename": str(temp_file)
+                        })
+                        logger.info(f"Copied attachment to temp dir: {temp_file}")
                 except Exception as e:
-                    logger.error(f"Error parsing Signal CLI log line: {e}")
-                    continue
+                    logger.error(f"Failed to copy attachment: {e}")
+
+            # TOTP Bypass logic
+            if settings.bypass_totp:
+                totp_match = re.search(r"^(\d{6})\s*(.*)", body)
+                if totp_match:
+                    totp_code = totp_match.group(1)
+                    message_body = totp_match.group(2).strip()
+                    full_message = f"{totp_code} {message_body}".strip() if message_body else totp_code
+                else:
+                    totp_code = "BYPASS"
+                    message_body = body
+                    # Don't prepend BYPASS to the body if the original message had no text
+                    full_message = f"{totp_code} {message_body}".strip() if message_body else ""
+            else:
+                totp_match = re.search(r"^(\d{6})\s*(.*)", body)
+                if not totp_match:
+                    return
+                totp_code = totp_match.group(1)
+                message_body = totp_match.group(2).strip()
+                full_message = f"{totp_code} {message_body}".strip()
+
+            parsed = parse_message(full_message, attachments)
+            if parsed is None:
+                logger.warning(f"Failed to parse message from logs: {totp_code}")
+                return
+
+            # Verify TOTP
+            if not settings.bypass_totp and not verify_totp(parsed["totp"], settings.totp_secret):
+                logger.warning(f"Invalid TOTP code from logs: {parsed['totp']}")
+                return
+
+            # Process the message
+            await on_message(parsed)
+            logger.info(f"Message from logs processed: {totp_code}")
+
+            # Send thank you reply
+            if sender and not is_group:
+                import random
+                import json
+                
+                emojis = ["😊", "👍", "🎉", "🔥", "🚀", "✨", "🙌", "😎", "🥳", "💯", "🎈", "✌️"]
+                random_emojis = "".join(random.choices(emojis, k=3))
+                reply_text = f"Thank you! {random_emojis}"
+                
+                try:
+                    reader, writer = await asyncio.open_unix_connection("/var/run/signal-cli/socket")
+                    msg = {
+                        "jsonrpc": "2.0",
+                        "method": "send",
+                        "params": {
+                            "recipient": [sender],
+                            "message": reply_text
+                        },
+                        "id": 1
+                    }
+                    writer.write((json.dumps(msg) + "\n").encode())
+                    await writer.drain()
+                    writer.close()
+                    await writer.wait_closed()
+                    logger.info(f"Sent thank you reply to {sender}")
+                except Exception as e:
+                    logger.error(f"Failed to send reply to {sender}: {e}")
+
+        while True:
+            try:
+                line = await asyncio.wait_for(process.stdout.readline(), timeout=1.0)
+                if not line:
+                    break
+                line_str = line.decode().strip()
+                if "Envelope from:" in line_str:
+                    await flush_envelope()
+                current_envelope_lines.append(line_str)
+            except asyncio.TimeoutError:
+                await flush_envelope()
 
     except Exception as e:
         logger.error(f"Error in Signal CLI log parsing: {e}")
