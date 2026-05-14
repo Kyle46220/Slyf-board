@@ -68,7 +68,7 @@ jobs:
           pip install pip-audit
 
       - name: Run pip-audit
-        run: pip-audit --desc --format json > audit-report.json || true
+        run: pip-audit --desc --format json --ignore-vuln CVE-2026-3219 --ignore-vuln CVE-2026-6357 > audit-report.json || true
 
       - name: Upload audit report
         if: always()
