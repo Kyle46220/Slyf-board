@@ -1,5 +1,6 @@
 import { useRef, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useNavigate } from "react-router-dom";
 import { type Post } from "../types";
 
@@ -110,7 +111,7 @@ export function PostCard({ post }: Props) {
       )}
       {post.body && (
         <div className="prose prose-sm text-zinc-800 max-w-none prose-p:my-1 prose-a:text-blue-600 prose-a:underline break-words">
-          <ReactMarkdown>{post.body}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{post.body}</ReactMarkdown>
         </div>
       )}
     </div>

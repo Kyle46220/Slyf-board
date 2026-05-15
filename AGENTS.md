@@ -10,7 +10,7 @@
 **Current Status:** Fully operational on GCP (Google Cloud Platform)
 
 **Key Technology Stack:**
-- **Backend:** FastAPI (Python), SQLAlchemy (asyncpg), PostgreSQL 15
+- **Backend:** FastAPI (Python), httpx (Cloudflare D1 HTTP API), aioboto3 (S3/R2)
 - **Frontend:** React 18, Vite, Tailwind CSS 4, React Router
 - **Message Platform:** Signal CLI (Java-based)
 - **Authentication:** TOTP (Time-based One-Time Password) via pyotp
@@ -31,7 +31,7 @@
 
 ### Services Running
 - **Signal CLI:** Daemon running for +61485676958 (message reception active)
-- **PostgreSQL:** Database for posts storage
+- **Cloudflare D1:** Serverless SQLite database for posts storage
 - **Nginx:** Reverse proxy for frontend and API
 - **Board Service:** FastAPI backend on port 8000 (processing messages via log parsing)
 
@@ -188,12 +188,17 @@ VITE_TOTP_SECRET=3MEW54GCJ5ATGUYEOYCGZ27AN6NQMSIZ npm run dev
 ### Environment Variables
 **Backend (.env):**
 ```
-DATABASE_URL=postgresql+asyncpg://board:board@localhost/board
+CF_ACCOUNT_ID=<YOUR_CLOUDFLARE_ACCOUNT_ID>
+CF_DATABASE_ID=<YOUR_D1_DATABASE_ID>
+CF_API_TOKEN=<YOUR_CLOUDFLARE_API_TOKEN>
+R2_ACCESS_KEY_ID=<YOUR_R2_ACCESS_KEY>
+R2_SECRET_ACCESS_KEY=<YOUR_R2_SECRET_KEY>
+R2_BUCKET_NAME=slyfe
+R2_ENDPOINT_URL=https://<YOUR_ACCOUNT_ID>.r2.cloudflarestorage.com
 TOTP_SECRET=<GENERATE_NEW_SECRET>
 ADMIN_TOKEN=<GENERATE_NEW_TOKEN>
 SIGNAL_SOCKET=/var/run/signal-cli/socket
 SIGNAL_PHONE_NUMBER=+61485676958
-MEDIA_DIR=/var/board/media
 ```
 
 **Token Generator (Netlify):**
@@ -201,14 +206,11 @@ MEDIA_DIR=/var/board/media
 
 ### Database Management
 ```bash
-# Connect to PostgreSQL on GCP
-gcloud compute ssh board-server --zone=australia-southeast1-a
-sudo -u postgres psql board
-
-# Create tables (if needed)
+# Database tables are automatically managed via Cloudflare D1. 
+# To initialize or update the D1 schema:
 cd /opt/backend
 source venv/bin/activate
-python -c "from app.database import engine; from app.models import Base; import asyncio; asyncio.run(Base.metadata.create_all(engine))"
+python -c "import asyncio; from app.d1_client import init_db; asyncio.run(init_db())"
 ```
 
 ### Signal CLI Management
@@ -506,8 +508,8 @@ journalctl -u signal-cli -n 50 --no-pager
 # Test API locally
 curl -s http://localhost:8000/api/posts | head -20
 
-# Test database
-sudo -u postgres psql board -c "SELECT COUNT(*) FROM posts;"
+# Check D1 database configuration
+cat /opt/backend/.env | grep CF_
 
 # Check disk space
 df -h /var/board/media
@@ -568,20 +570,15 @@ sudo systemctl reload nginx
 sudo systemctl restart nginx
 ```
 
-### Database Issues
+### Database Issues (Cloudflare D1)
 ```bash
-# Check PostgreSQL status
-sudo systemctl status postgresql
+# Check if Cloudflare D1 environment variables are correctly loaded
+cat /opt/backend/.env | grep CF_
 
-# Connect to database
-sudo -u postgres psql board
-
-# Check table structure
-\dt
-
-# Run queries manually
-SELECT COUNT(*) FROM posts;
-SELECT * FROM posts ORDER BY created_at DESC LIMIT 10;
+# Re-initialize the D1 database if tables are missing
+cd /opt/backend
+source venv/bin/activate
+python -c "import asyncio; from app.d1_client import init_db; asyncio.run(init_db())"
 ```
 
 ---

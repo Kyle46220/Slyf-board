@@ -68,7 +68,7 @@ jobs:
           pip install pip-audit
 
       - name: Run pip-audit
-        run: pip-audit --desc --format json --ignore-vuln CVE-2026-3219 --ignore-vuln CVE-2026-6357 > audit-report.json || true
+        run: pip-audit --desc --format json --ignore-vuln CVE-2026-3219 --ignore-vuln CVE-2026-6357 > audit-report.json
 
       - name: Upload audit report
         if: always()
@@ -76,16 +76,6 @@ jobs:
         with:
           name: backend-audit-report
           path: backend/audit-report.json
-
-      - name: Check for vulnerabilities
-        run: |
-          if grep -q '"vulnerabilities": *0' audit-report.json; then
-            echo "No vulnerabilities found"
-          else
-            echo "Vulnerabilities detected!"
-            cat audit-report.json
-            exit 1
-          fi
 
   codeql-scan:
     name: CodeQL Analysis

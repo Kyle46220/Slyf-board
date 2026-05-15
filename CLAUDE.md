@@ -6,7 +6,7 @@ Zero-knowledge anonymous bulletin board. Signal messages + TOTP authentication =
 ## Repo Map
 ```
 board/
-├── backend/           # FastAPI + PostgreSQL
+├── backend/           # FastAPI + Cloudflare D1/R2
 ├── frontend/          # React + Vite
 ├── token-generator/   # React + Vite (Netlify)
 ├── .claude/          # Skills, hooks, configuration
@@ -28,7 +28,7 @@ board/
 - Token generator Netlify env vars - Build-time injection required
 
 ## Key Technologies
-- **Backend:** FastAPI, SQLAlchemy, PostgreSQL, pyotp
+- **Backend:** FastAPI, httpx (Cloudflare D1 API), aioboto3 (Cloudflare R2), pyotp
 - **Frontend:** React 18, Vite, Tailwind CSS 4
 - **Signal:** Signal CLI 0.14.3 (Unix socket + log parsing)
 - **Deployment:** GCP Compute (e2-micro), Netlify (token generator)

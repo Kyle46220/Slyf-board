@@ -3,6 +3,8 @@
 ## Directory Structure
 ```
 docs/
+├── architecture/   # System design and product requirements
+│   └── PRD.md      # Comprehensive Product Requirements Document
 └── runbooks/       # Current operational procedures
     ├── FIXES_IMPLEMENTATION.md           # Recent connection and token fixes
     └── SIGNAL_INTEGRATION_SUCCESS.md    # Signal integration success report
