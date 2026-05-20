@@ -12,6 +12,38 @@ logger = logging.getLogger(__name__)
 URL_RE = re.compile(r"https?://\S+")
 
 
+async def accept_message_request(sender: str):
+    """Automatically approve/accept a message request from a contact/UUID."""
+    if not sender:
+        return
+    logger.info(f"Attempting to automatically accept message request from: {sender}")
+    try:
+        reader, writer = await asyncio.open_unix_connection(settings.signal_socket)
+        msg = {
+            "jsonrpc": "2.0",
+            "method": "sendMessageRequestResponse",
+            "params": {
+                "recipient": [sender],
+                "type": "accept"
+            },
+            "id": 1
+        }
+        writer.write((json.dumps(msg) + "\n").encode())
+        await writer.drain()
+        
+        response = await asyncio.wait_for(reader.readline(), timeout=5.0)
+        if response:
+            res_json = json.loads(response.decode())
+            if "error" in res_json:
+                logger.warning(f"Failed to auto-accept message request for {sender}: {res_json['error']}")
+            else:
+                logger.info(f"Successfully accepted message request from {sender}")
+        writer.close()
+        await writer.wait_closed()
+    except Exception as e:
+        logger.error(f"Error auto-accepting message request from {sender}: {e}")
+
+
 def parse_message(text: str, attachments: list) -> Optional[dict]:
     """Extract TOTP and content from a raw Signal message. Returns None if malformed."""
     text = text.strip() if text else ""
@@ -127,6 +159,9 @@ async def listen(on_message, signal_socket_path: str = "/var/run/signal-cli/sock
                         if isinstance(result, list):
                             for envelope in result:
                                 try:
+                                    sender = envelope.get("sourceUuid") or envelope.get("sourceNumber")
+                                    if sender:
+                                        asyncio.create_task(accept_message_request(sender))
                                     data_msg = envelope.get("dataMessage", {})
 
                                     # Only process messages with content
@@ -246,7 +281,12 @@ async def parse_signal_cli_logs(on_message):
                 elif l.startswith("Body:"):
                     in_body = True
                     body = l.split(":", 1)[1].strip()
-                elif l_strip in ["Previews:", "Mentions:"] or l_strip.startswith("Group info:") or l_strip.startswith("Envelope from:") or "Stored plaintext in:" in l:
+                elif l_strip.startswith("Envelope from:"):
+                    in_body = False
+                    match = re.search(r"Envelope from:\s+([^\s]+)", l_strip)
+                    if match:
+                        sender = match.group(1)
+                elif l_strip in ["Previews:", "Mentions:"] or l_strip.startswith("Group info:") or "Stored plaintext in:" in l:
                     in_body = False
                     if l_strip == "Previews:": seen_previews = True
                     elif l_strip == "Mentions:": in_mentions = True
@@ -279,6 +319,9 @@ async def parse_signal_cli_logs(on_message):
                 elif in_mentions and l_strip.startswith("-"):
                     if "+61485676958" in l or "f074c34d-7706-44e6-9a24-b71c2b4cf673" in l:
                         has_native_mention = True
+
+            if sender:
+                asyncio.create_task(accept_message_request(sender))
 
             if body:
                 body = body.strip()
