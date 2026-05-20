@@ -73,7 +73,7 @@
 signal-cli --config /var/signal-cli listAccounts
 
 # Start daemon
-signal-cli -u +61485676958 --config /var/signal-cli daemon --socket /var/run/signal-cli/socket
+signal-cli --trust-new-identities always -u +61485676958 --config /var/signal-cli daemon --socket /var/run/signal-cli/socket
 
 # Restart service
 systemctl restart signal-cli
@@ -101,6 +101,8 @@ systemctl restart signal-cli
 - Message reception: Via Signal CLI log parsing (journalctl)
 - Connection: Unix socket `/var/run/signal-cli/socket`
 - Processing: TOTP validation, metadata stripping, media processing
+- Message Requests: Automatically accepted/approved via `sendMessageRequestResponse` (type `accept`) to prevent decryption errors
+- Identity Keys: Automatically trusted using `--trust-new-identities always` flag on daemon startup
 
 ### 4. Frontend
 **Location:** `/var/www/board/dist/` on GCP
@@ -414,7 +416,7 @@ Signal messages must follow this format:
 systemctl status signal-cli
 
 # Start manually (for debugging)
-sudo -u signal signal-cli -u +61485676958 --config /var/signal-cli daemon --socket /var/run/signal-cli/socket
+sudo -u signal signal-cli --trust-new-identities always -u +61485676958 --config /var/signal-cli daemon --socket /var/run/signal-cli/socket
 
 # View logs
 journalctl -u signal-cli -f
@@ -555,7 +557,7 @@ sudo systemctl restart signal-cli
 ls -la /var/run/signal-cli/socket
 
 # If socket missing, restart manually
-sudo -u signal signal-cli -u +61485676958 --config /var/signal-cli daemon --socket /var/run/signal-cli/socket
+sudo -u signal signal-cli --trust-new-identities always -u +61485676958 --config /var/signal-cli daemon --socket /var/run/signal-cli/socket
 ```
 
 ### Nginx Issues
@@ -651,4 +653,4 @@ signal-cli --config /var/signal-cli listAccounts
 ---
 
 *This AGENTS.md is maintained as part of the Secure Anonymous Board project*
-*Last updated: 2026-04-25*
+*Last updated: 2026-05-20*

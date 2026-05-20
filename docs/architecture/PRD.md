@@ -42,6 +42,9 @@ Posts can contain text, links, or media. The frontend must appropriately render 
   - The bot automatically accepts group invitations.
   - When responding to messages in a group, the bot strips `@mentions` of itself from the message text before processing the post.
   - TOTP validation still applies equally to group messages.
+- **Auto-Accept and Trust:**
+  - The bot automatically accepts all incoming conversation/message requests from new contacts/UUIDs.
+  - The bot automatically trusts all new and updated safety numbers (identities) of contacts to prevent decryption and communication failures.
 
 ## 5. Non-Functional Requirements
 - **Real-Time Updates:** The frontend maintains an SSE connection (`/api/stream`) to receive new posts instantly without manual refreshing.

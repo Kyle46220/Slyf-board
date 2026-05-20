@@ -38,8 +38,8 @@ board/
 For complete project documentation, deployment details, troubleshooting procedures, and operational status, see **[AGENTS.md](AGENTS.md)**.
 
 ## Quick Access
-- **Board:** http://35.213.252.2/
-- **Token Generator:** https://qwe-rty.netlify.app/
+- **Board:** http://slyfeboard.vercel.app/
+- **Token Generator:** https://qwe-rty.netlify.app/ **Currently disabled - will reactivate when needed**
 - **Signal Phone:** +61485676958
 
 ## Reusable Workflows
