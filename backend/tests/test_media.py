@@ -33,41 +33,48 @@ def make_test_mp4(path: Path):
     )
 
 
-def test_process_image_strips_exif_and_converts_to_webp(tmp_path):
+@pytest.mark.asyncio
+async def test_process_image_strips_exif_and_converts_to_webp(tmp_path):
     src = tmp_path / "input.jpg"
     make_jpeg_with_exif(src)
-    out = process_image(src, TMP / "abc123")
+    out = await process_image(src, TMP / "abc123", "abc123")
     assert out is not None
-    assert out.suffix == ".webp"
-    result = Image.open(out)
+    out_path = Path(out)
+    assert out_path.suffix == ".webp"
+    result = Image.open(out_path)
     assert len(result.getexif()) == 0
 
 
-def test_process_image_returns_none_on_corrupt_file(tmp_path):
+@pytest.mark.asyncio
+async def test_process_image_returns_none_on_corrupt_file(tmp_path):
     src = tmp_path / "bad.jpg"
     src.write_bytes(b"not an image")
-    out = process_image(src, TMP / "def456")
+    out = await process_image(src, TMP / "def456", "def456")
     assert out is None
 
 
 @pytest.mark.skipif(not has_ffmpeg, reason="ffmpeg not installed")
-def test_process_video_re_encodes_to_mp4(tmp_path):
+@pytest.mark.asyncio
+async def test_process_video_re_encodes_to_mp4(tmp_path):
     """Requires ffmpeg installed."""
     src = tmp_path / "input.mp4"
     make_test_mp4(src)
-    out = process_video(src, TMP / "vid123")
+    out = await process_video(src, TMP / "vid123", "vid123")
     assert out is not None
-    assert out.suffix == ".mp4"
-    assert out.exists()
+    out_path = Path(out)
+    assert out_path.suffix == ".mp4"
+    assert out_path.exists()
 
 
-def test_process_video_returns_none_on_corrupt_file(tmp_path):
+@pytest.mark.asyncio
+async def test_process_video_returns_none_on_corrupt_file(tmp_path):
     src = tmp_path / "bad.mp4"
     src.write_bytes(b"not a video")
-    out = process_video(src, TMP / "vid456")
+    out = await process_video(src, TMP / "vid456", "vid456")
     assert out is None
 
 
-def test_scrape_og_returns_none_on_network_error():
-    result = scrape_og("http://10.255.255.1/")
+@pytest.mark.asyncio
+async def test_scrape_og_returns_none_on_network_error():
+    result = await scrape_og("http://10.255.255.1/")
     assert result is None

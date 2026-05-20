@@ -256,7 +256,19 @@ async def parse_signal_cli_logs(on_message):
                         attachments_files.append(file_path)
                 elif in_body:
                     # Strip Signal metadata footers that sometimes appear in logs
-                    if "(with profile key)" in l_strip or l_strip == "Data message":
+                    l_lower = l_strip.lower()
+                    if (
+                        "profile key" in l_lower or
+                        l_strip == "Data message" or
+                        l_strip.startswith("Attachments:") or
+                        l_strip.startswith("Attachment:") or
+                        l_lower.startswith("content-type:") or
+                        l_lower.startswith("type:") or
+                        l_lower.startswith("id:") or
+                        l_lower.startswith("upload timestamp:") or
+                        l_lower.startswith("size:") or
+                        l_lower.startswith("dimensions:")
+                    ):
                         in_body = False
                         continue
                     # Append multi-line body content

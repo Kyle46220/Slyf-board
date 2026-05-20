@@ -72,31 +72,120 @@ export function PostCard({ post }: Props) {
     borderColor: rainbowColor,
   };
 
-  // Link posts: entire card is an external anchor
+  // Helper to extract external URL from body
+  const getExternalUrl = () => {
+    if (!post.body) return "#";
+    const urlRegex = /(https?:\/\/[^\s]+)/;
+    const match = post.body.match(urlRegex);
+    return match ? match[0] : post.body;
+  };
+  const externalUrl = getExternalUrl();
+  
+  const getDomain = (urlStr: string) => {
+    try {
+      return new URL(urlStr).hostname;
+    } catch {
+      return urlStr;
+    }
+  };
+  const domain = getDomain(externalUrl);
+
+  const isDirectImageLink = post.content_type === "link" && post.og_image_path && !post.og_title && !post.og_description;
+
+  // Link posts
   if (post.content_type === "link") {
+    const isOnlyUrl = post.body ? post.body.trim() === externalUrl : false;
+
     return (
-      <a
-        href={post.body ?? "#"}
-        target="_blank"
-        rel="noopener noreferrer"
-        className={`${cardBase} block`}
+      <div
+        className={cardBase}
         style={cardStyle}
+        onClick={() => navigate(`/post/${post.hash}`)}
       >
         {post.og_image_path && (
-          <LazyImage src={post.og_image_path.startsWith('http') ? post.og_image_path : `/media/${post.hash}/og.webp`} alt="link preview" />
+          <a
+            href={externalUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="block overflow-hidden rounded mb-3 group/img relative"
+          >
+            <LazyImage
+              src={post.og_image_path.startsWith('http') ? post.og_image_path : `/media/${post.hash}/og.webp`}
+              alt="link preview"
+            />
+            <div className="absolute inset-0 bg-black/10 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
+              <span className="bg-white/95 text-black text-xs font-semibold px-2 py-1 rounded shadow-sm flex items-center gap-1">
+                {isDirectImageLink ? "Open Image" : "Visit Site"} <span className="text-zinc-500">↗</span>
+              </span>
+            </div>
+          </a>
         )}
-        {post.og_title && <p className="font-semibold mt-3 text-sm">{post.og_title}</p>}
-        {post.og_description && (
-          <p className="text-xs text-zinc-500 mt-1 line-clamp-2">{post.og_description}</p>
+
+        {!isDirectImageLink && (
+          <div className="space-y-1">
+            {post.og_title && (
+              <h3 className="font-semibold text-sm text-zinc-900 leading-snug hover:text-blue-600 transition-colors">
+                <a
+                  href={externalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {post.og_title}
+                </a>
+              </h3>
+            )}
+            {post.og_description && (
+              <p className="text-xs text-zinc-500 mt-1 line-clamp-2 leading-relaxed">
+                {post.og_description}
+              </p>
+            )}
+          </div>
         )}
-        {post.body && (
-          <p className="text-[10px] text-zinc-400 mt-2 truncate">{post.body}</p>
+
+        {/* Display inline body message if it exists and is more than just the raw URL */}
+        {post.body && !isOnlyUrl && (
+          <div className="prose prose-sm text-zinc-800 max-w-none mt-2 border-t border-zinc-100 pt-2 prose-p:my-1 prose-a:text-blue-600 prose-a:underline break-words">
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                a: ({ node, ...props }) => (
+                  <a
+                    {...props}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-blue-600 underline hover:text-blue-800"
+                  />
+                )
+              }}
+            >
+              {post.body}
+            </ReactMarkdown>
+          </div>
         )}
-      </a>
+
+        {/* Clickable domain path badge */}
+        <div className="mt-3 flex items-center justify-between border-t border-zinc-100 pt-2 text-[11px] text-zinc-400">
+          <a
+            href={externalUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1 font-medium text-blue-600 hover:text-blue-800 transition-colors bg-blue-50/50 hover:bg-blue-50 px-2 py-1 rounded border border-blue-100/50 hover:border-blue-100"
+          >
+            <span>{domain}</span>
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+          </a>
+        </div>
+      </div>
     );
   }
 
-  // Image / video / text posts: click navigates to single-post view
+  // Image / video / text posts
   return (
     <div
       className={cardBase}
@@ -111,7 +200,22 @@ export function PostCard({ post }: Props) {
       )}
       {post.body && (
         <div className="prose prose-sm text-zinc-800 max-w-none prose-p:my-1 prose-a:text-blue-600 prose-a:underline break-words">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{post.body}</ReactMarkdown>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              a: ({ node, ...props }) => (
+                <a
+                  {...props}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={(e) => e.stopPropagation()}
+                  className="text-blue-600 underline hover:text-blue-800"
+                />
+              )
+            }}
+          >
+            {post.body}
+          </ReactMarkdown>
         </div>
       )}
     </div>

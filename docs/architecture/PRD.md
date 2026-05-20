@@ -10,7 +10,7 @@
 - **Media Storage:** Cloudflare R2 (S3-compatible object storage) for storing processed media assets.
 
 ## 2. Authentication & Security (Zero-Knowledge)
-- **TOTP Validation:** All posts must begin with a valid 6-digit TOTP code. The code is valid for 15 minutes (current and previous 5-minute windows).
+- **TOTP Validation:** All posts must begin with a valid 6-digit TOTP code. The code is valid for 15 minutes (current and previous 5-minute windows). (<< NOTE THIS IS TEMPORARILY DISABLED FOR TESTING)
 - **Metadata Stripping:** The sender's phone number, name, and Signal UUID are completely discarded upon message reception. They are never stored in the database.
 - **EXIF Removal:** All uploaded media (images and videos) are stripped of EXIF data and identifying metadata before storage.
 
@@ -28,7 +28,7 @@ Posts can contain text, links, or media. The frontend must appropriately render 
 - OG images are processed and stored locally/remotely to prevent hotlinking and ensure longevity.
 
 ### 3.3 Media (Images and Videos)
-- **Direct Image Messaging:** Users can attach an image directly to a Signal message (with the TOTP code in the caption).
+- **Direct Image Messaging:** Users can attach an image directly to a Signal message (with the TOTP code in the caption - **currently disabled do not need code).
 - **Image Processing & Resizing:** 
   - Images are converted to `WebP` format.
   - Images are resized to a maximum dimension of 1920x1920 pixels while maintaining aspect ratio.

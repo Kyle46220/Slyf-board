@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -57,11 +58,14 @@ async def handle_message(parsed: dict):
                 content_type = "text"
 
     elif content_type == "link" and parsed.get("body"):
-        og = await scrape_og(parsed["body"], media_dir, post_hash)
-        if og:
-            og_title = og.title
-            og_description = og.description
-            og_image_path = str(og.image_path) if og.image_path else None
+        url_match = re.search(r"https?://\S+", parsed["body"])
+        if url_match:
+            url_to_scrape = url_match.group(0)
+            og = await scrape_og(url_to_scrape, media_dir, post_hash)
+            if og:
+                og_title = og.title
+                og_description = og.description
+                og_image_path = str(og.image_path) if og.image_path else None
 
     from app.d1_client import d1
 
