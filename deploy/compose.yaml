@@ -1,0 +1,30 @@
+services:
+  synapse:
+    image: ${SYNAPSE_IMAGE:-matrixdotorg/synapse:latest}
+    restart: unless-stopped
+    volumes:
+      - ./data/synapse:/data
+      - ./data/signal/registration.yaml:/signal-registration.yaml:ro
+    ports:
+      - "127.0.0.1:8008:8008"
+  signal:
+    image: ${SIGNAL_IMAGE:-dock.mau.dev/mautrix/signal:latest}
+    restart: unless-stopped
+    volumes:
+      - ./data/signal:/data
+    depends_on:
+      - synapse
+  relay:
+    build: ../relay
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - relay-state:/data
+    depends_on:
+      - synapse
+      - signal
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+volumes:
+  relay-state:

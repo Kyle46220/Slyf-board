@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./backend
+        working-directory: ./relay
 
     steps:
       - name: Checkout code
@@ -68,14 +68,14 @@ jobs:
           pip install pip-audit
 
       - name: Run pip-audit
-        run: pip-audit --desc --format json --ignore-vuln CVE-2026-3219 --ignore-vuln CVE-2026-6357 > audit-report.json
+        run: pip-audit -r requirements.txt --desc --format json > audit-report.json
 
       - name: Upload audit report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: backend-audit-report
-          path: backend/audit-report.json
+          path: relay/audit-report.json
 
   codeql-scan:
     name: CodeQL Analysis
@@ -134,3 +134,4 @@ jobs:
           echo "- Frontend Audit: ${{ needs.frontend-audit.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- Backend Audit: ${{ needs.backend-audit.result }}" >> $GITHUB_STEP_SUMMARY
           echo "- CodeQL Scan: ${{ needs.codeql-scan.result }}" >> $GITHUB_STEP_SUMMARY
+

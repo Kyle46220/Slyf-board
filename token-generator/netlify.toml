@@ -1,3 +1,0 @@
-[build]
-  command = "VITE_TOTP_SECRET=$VITE_TOTP_SECRET npm run build"
-  publish = "dist"

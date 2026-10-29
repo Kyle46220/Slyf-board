@@ -16,8 +16,8 @@ export function SinglePost() {
       .catch(() => setNotFound(true));
   }, [hash]);
 
-  if (notFound) return <div className="p-8 text-white">Post not found.</div>;
-  if (!post) return <div className="p-8 text-white">Loading...</div>;
+  if (notFound) return <div className="p-8 text-zinc-500">Post not found.</div>;
+  if (!post) return <div className="p-8 text-zinc-500">Loading...</div>;
 
   return (
     <div className="max-w-xl mx-auto p-8">
@@ -25,3 +25,4 @@ export function SinglePost() {
     </div>
   );
 }
+
