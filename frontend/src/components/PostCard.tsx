@@ -46,7 +46,7 @@ export function PostCard({ post }: Props) {
   const navigate = useNavigate();
 
   const mediaUrl = post.media_path
-    ? post.media_path.startsWith('http') 
+    ? (post.media_path.startsWith('http') || post.media_path.startsWith('/media/')) 
       ? post.media_path 
       : `/media/${post.hash}/${post.content_type === "video" ? "media.mp4" : "media.webp"}`
     : null;
@@ -221,3 +221,4 @@ export function PostCard({ post }: Props) {
     </div>
   );
 }
+
