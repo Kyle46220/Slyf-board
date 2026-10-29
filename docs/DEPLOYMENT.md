@@ -35,7 +35,7 @@ Install PyYAML in a local virtualenv, then apply the checked-in config helper:
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install 'PyYAML>=6,<7'
-.venv/bin/python configure.py
+sudo .venv/bin/python configure.py
 # Second run generates registration.yaml and exits.
 docker compose run --rm --no-deps signal
 # Registration is now available for Synapse's read-only mount.
