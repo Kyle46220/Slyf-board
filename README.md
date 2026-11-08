@@ -15,6 +15,7 @@ The frontend retains its existing cards, typography and masonry layout. It refre
 
 The Cloudflare portion is serverless and designed for modest usage within free allowances. **The Signal bridge needs an always-on host** with persistent storage; Cloudflare Workers cannot run its native Go/Rust process or Signal session database. Use an existing computer or a suitable free VM for the private bridge stack. Neither free hosting nor a particular usage allowance is guaranteed.
 
+- [Embed in Bear Blog with one script tag](docs/EMBEDDING.md)
 - [Deployment, Signal linking and migration](docs/DEPLOYMENT.md)
 - [Architecture, privacy boundaries and limits](docs/ARCHITECTURE.md)
 - [Upstream Signal bridge setup](https://docs.mau.fi/bridges/go/setup.html?bridge=signal)
