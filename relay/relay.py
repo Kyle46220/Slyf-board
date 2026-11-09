@@ -2,7 +2,9 @@
 
 Only normalized content leaves this host. No signal-cli or log parsing is used.
 """
+import base64
 import hashlib
+from html.parser import HTMLParser
 import io
 import json
 import logging
@@ -32,7 +34,9 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 OPENER = urllib.request.build_opener(NoRedirect)
 
 def request(url, token, method='GET', data=None, content_type='application/json', limit=32 * 1024 * 1024):
-    headers = {'Authorization': f'Bearer {token}'}
+    headers = {'User-Agent': 'SlyfBoard-Relay/1.0'}
+    if token:
+        headers['Authorization'] = f'Bearer {token}'
     if data is not None:
         headers['Content-Type'] = content_type
         if isinstance(data, dict):
@@ -91,6 +95,47 @@ def normalize(raw, msgtype):
         raise Rejected('Processed media exceeds 10 MiB.')
     return result, mime
 
+class MentionLinks(HTMLParser):
+    """Find explicit mention pills, excluding the quoted reply fallback."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.quoted = 0
+        self.users = set()
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'mx-reply':
+            self.quoted += 1
+        if tag != 'a' or self.quoted:
+            return
+        href = dict(attrs).get('href', '')
+        try:
+            url = urllib.parse.urlsplit(href)
+        except ValueError:
+            return
+        if url.scheme == 'https' and url.netloc == 'matrix.to':
+            user = urllib.parse.unquote(url.fragment).lstrip('/').split('?', 1)[0]
+            if user.startswith('@'):
+                self.users.add(user)
+
+    def handle_endtag(self, tag):
+        if tag == 'mx-reply' and self.quoted:
+            self.quoted -= 1
+
+
+def signal_chat_type(channel_id):
+    if not isinstance(channel_id, str):
+        return None
+    if re.fullmatch(r'(?:PNI:)?[a-fA-F0-9-]{36}', channel_id):
+        return 'dm'
+    if len(channel_id) == 44:
+        try:
+            if len(base64.b64decode(channel_id, validate=True)) == 32:
+                return 'group'
+        except ValueError:
+            pass
+    return None
+
+
 class Relay:
     def __init__(self):
         self.matrix = os.environ['MATRIX_URL'].rstrip('/')
@@ -103,7 +148,16 @@ class Relay:
         self.ingest_token = os.environ['INGEST_TOKEN']
         if not self.board.startswith('https://') or len(self.ingest_token) < 32:
             raise ValueError('BOARD_URL must use HTTPS and INGEST_TOKEN must have at least 32 characters')
-        self.allowed_rooms = set(filter(None, os.getenv('ALLOWED_ROOMS', '').split(',')))
+        self.allowed_rooms = {x.strip() for x in os.getenv('ALLOWED_ROOMS', '').split(',') if x.strip()}
+        self.group_posting = os.getenv('GROUP_POSTING', 'disabled').lower()
+        if self.group_posting not in ('disabled', 'mentions'):
+            raise ValueError('GROUP_POSTING must be disabled or mentions')
+        aliases = {x.strip() for x in os.getenv('BOT_MENTION_IDS', '').split(',') if x.strip()}
+        if any(not self.ghost.fullmatch(x) for x in aliases):
+            raise ValueError('BOT_MENTION_IDS must contain local Signal ghost IDs')
+        self.mention_ids = aliases | {self.user}
+        self.own_ghosts = set(aliases)
+        self.group_rooms = set()
         state = Path(os.getenv('STATE_DIR', '/data'))
         state.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(state / 'relay.sqlite3')
@@ -111,6 +165,10 @@ class Relay:
         if not self.get('started'):
             self.set('started', str(int(time.time() * 1000)))
         self.started = int(self.get('started'))
+        # Enabling group posting must not publish previously received group history.
+        if self.group_posting == 'mentions' and not self.get('group_started'):
+            self.set('group_started', str(int(time.time() * 1000)))
+        self.group_started = int(self.get('group_started') or self.started)
 
     def get(self, key):
         row = self.db.execute('SELECT value FROM state WHERE key=?', (key,)).fetchone()
@@ -125,19 +183,62 @@ class Relay:
 
     def trusted(self, room):
         state = self.matrix_json('/rooms/' + urllib.parse.quote(room, safe='') + '/state')
-        bridge = any(e['type'] in ('m.bridge', 'uk.half-shot.bridge') and e.get('sender') == self.bot
-                     and e.get('content', {}).get('protocol', {}).get('id') == 'signal' for e in state)
-        if not bridge:
+        info = [e.get('content', {}) for e in state
+                if e.get('type') in ('m.bridge', 'uk.half-shot.bridge') and e.get('sender') == self.bot
+                and e.get('content', {}).get('protocol', {}).get('id') == 'signal']
+        self.group_rooms.discard(room)
+        if not info or (self.allowed_rooms and room not in self.allowed_rooms):
             return False
-        if any(e['type'] == 'm.room.encryption' for e in state):
+        channels = {e.get('channel', {}).get('id') for e in info}
+        if len(channels) != 1:
+            return False
+        kind = signal_chat_type(next(iter(channels)))
+        if not kind or (kind == 'group' and self.group_posting != 'mentions'):
+            return False
+        if any(e.get('type') == 'm.room.encryption' for e in state):
             raise RuntimeError('Encrypted Matrix portal: use the documented private unencrypted homeserver')
-        self.own_ghosts = {'@signal_' + e.get('content', {}).get('channel', {}).get('receiver', '') + ':' + self.domain
-                           for e in state if e.get('sender') == self.bot and e['type'] in ('m.bridge', 'uk.half-shot.bridge')}
-        if self.allowed_rooms:
-            return room in self.allowed_rooms
-        # Default: only direct-message portals. Explicit room allowlisting enables groups.
-        info = [e.get('content', {}) for e in state if e['type'] in ('m.bridge', 'uk.half-shot.bridge') and e.get('sender') == self.bot]
-        return any(re.fullmatch(r'(?:PNI:)?[a-fA-F0-9-]{36}', e.get('channel', {}).get('id', '')) for e in info)
+        self.own_ghosts = {x for x in self.mention_ids if self.ghost.fullmatch(x)}
+        for e in info:
+            receiver = e.get('channel', {}).get('receiver', '')
+            if re.fullmatch(r'[a-fA-F0-9-]{36}', receiver):
+                self.own_ghosts.add('@signal_' + receiver + ':' + self.domain)
+        if kind == 'group':
+            self.group_rooms.add(room)
+        return True
+
+    def mentions_bot(self, content):
+        mentions = content.get('m.mentions', {})
+        if not isinstance(mentions, dict) or not isinstance(mentions.get('user_ids'), list):
+            return False
+        targets = (self.mention_ids | self.own_ghosts).intersection(
+            x for x in mentions['user_ids'] if isinstance(x, str))
+        if not targets:
+            return False
+        # Matrix replies may auto-notify the original author. A reply alone is not
+        # a Signal @mention: require an explicit pill outside the quoted fallback.
+        if content.get('m.relates_to', {}).get('m.in_reply_to'):
+            if content.get('format') != 'org.matrix.custom.html' or not isinstance(content.get('formatted_body'), str):
+                return False
+            parser = MentionLinks()
+            parser.feed(content['formatted_body'])
+            return bool(targets & parser.users)
+        return True
+
+    def join_invites(self, invites):
+        for room, invite in invites.items():
+            if self.allowed_rooms and room not in self.allowed_rooms:
+                continue
+            members = invite.get('invite_state', {}).get('events', [])
+            # Ghost IDs are in the bridge's exclusive local namespace. Never join
+            # invitations from arbitrary Matrix users. Portal state is checked
+            # separately before any content is published.
+            for event in members:
+                sender = event.get('sender', '')
+                allowed = sender == self.bot or (self.group_posting == 'mentions' and self.ghost.fullmatch(sender))
+                if (event.get('type') == 'm.room.member' and event.get('state_key') == self.user
+                        and event.get('content', {}).get('membership') == 'invite' and allowed):
+                    self.matrix_json('/join/' + urllib.parse.quote(room, safe=''), 'POST', {})
+                    break
 
     def reply(self, room, event_id, body):
         txn = hashlib.sha256(('reply:' + event_id).encode()).hexdigest()
@@ -156,6 +257,9 @@ class Relay:
         content = event.get('content', {})
         # Edits/reactions are not new cards. Never publish quoted reply fallbacks.
         if content.get('m.relates_to', {}).get('rel_type') == 'm.replace':
+            return
+        if room in self.group_rooms and (event.get('origin_server_ts', 0) < self.group_started
+                                          or not self.mentions_bot(content)):
             return
         event_id = event['event_id']
         key = hashlib.sha256((room + '\0' + event_id).encode()).hexdigest()
@@ -187,8 +291,20 @@ class Relay:
             elif not body.strip():
                 raise Rejected('Send a non-empty message.')
             payload, content_type = multipart(key, body, media)
-            request(self.board + '/api/ingest', self.ingest_token, 'POST', payload, content_type)
-            self.reply(room, event_id, 'Posted to the public board: https://board.slyfe.fyi/#/post/' + key)
+            receipt = json.loads(request(self.board + '/api/ingest', self.ingest_token, 'POST', payload, content_type))
+            if not isinstance(receipt, dict) or receipt.get('hash') != key:
+                raise RuntimeError('Ingest did not acknowledge this event')
+            # A 2xx HTML page, wrong domain, or tombstone must never yield a false
+            # success reply. Confirm that the public post can actually be read.
+            try:
+                published = json.loads(request(self.board + '/api/posts/' + key, '', limit=512 * 1024))
+            except urllib.error.HTTPError as error:
+                if error.code == 404 and receipt.get('duplicate') is True:
+                    raise Rejected('This submission was previously removed and has not been republished.') from error
+                raise
+            if not isinstance(published, dict) or published.get('hash') != key:
+                raise RuntimeError('Public post verification failed')
+            self.reply(room, event_id, 'Posted to the public board: ' + self.board + '/post/' + key)
         except Rejected as error:
             self.reply(room, event_id, str(error))
 
@@ -228,11 +344,7 @@ class Relay:
         if since:
             query['since'] = since
         data = self.matrix_json('/sync?' + urllib.parse.urlencode(query))
-        for room, invite in data.get('rooms', {}).get('invite', {}).items():
-            members = invite.get('invite_state', {}).get('events', [])
-            if any(e.get('type') == 'm.room.member' and e.get('state_key') == self.user
-                   and e.get('sender') == self.bot and e.get('content', {}).get('membership') == 'invite' for e in members):
-                self.matrix_json('/join/' + urllib.parse.quote(room, safe=''), 'POST', {})
+        self.join_invites(data.get('rooms', {}).get('invite', {}))
         for room, joined in data.get('rooms', {}).get('join', {}).items():
             timeline = joined.get('timeline', {})
             if not timeline.get('events'):

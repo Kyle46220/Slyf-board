@@ -1,6 +1,6 @@
 # Slyf Board
 
-Send a Signal message to a dedicated bot account; it appears as a card on the existing rainbow-bordered masonry gallery. Text, links, images and videos are supported. The bot replies with the post link after storage succeeds.
+Send a Signal message to a dedicated bot account, or @mention it in an enabled group; it appears as a card on the existing rainbow-bordered masonry gallery. Text, links, images and videos are supported. The bot replies with a canonical post link after validating storage and reading back the public post.
 
 This backend uses **[mautrix-signal](https://github.com/mautrix/signal)**, the official Signal bridge listed by [Beeper's bridge manager](https://github.com/beeper/bridge-manager#official-bridge-list). The former signal-cli, log parsing, FastAPI service and browser-shared TOTP implementation are replaced.
 
