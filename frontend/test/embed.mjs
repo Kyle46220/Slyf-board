@@ -265,6 +265,13 @@ try {
     0,
     "Confirmation opens details, not the whole gallery",
   );
+  await mobile.getByRole('link', {name:'← Back to board'}).click();
+  await mobile.locator('.masonry > div').first().waitFor();
+  assert.equal(new URL(mobile.url()).pathname, '/', 'Standalone post links return to the gallery');
+  await mobile.goto(origin + '/post/' + 'f'.repeat(64));
+  await mobile.getByText('Post not found.', {exact:true}).waitFor();
+  await mobile.getByRole('link', {name:'← Back to board'}).click();
+  await mobile.locator('.masonry > div').first().waitFor();
   await mobile.goto(origin + "/");
   await mobile.getByText("Focused mobile post", { exact: true }).waitFor();
   insert(502, "Standalone resumed post");

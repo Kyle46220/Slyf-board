@@ -63,6 +63,12 @@ The sample uses moving image tags for initial setup. Resolve and pin `SYNAPSE_IM
 
 Set `BOARD_URL=https://board.slyfe.fyi` (or your own canonical Worker domain) in the private relay `.env`. This domain must serve the Worker API as well as the gallery. Recreate the relay after editing `.env`; editing the file alone does not change a running container. The relay submits there, validates the returned event hash, reads back the public post, and only then replies with `/post/HASH`. Existing `/#/post/HASH` links are redirected by the frontend. A 2xx HTML page, mismatched response or unreadable post cannot produce a success confirmation.
 
+### Private bot-number protection
+
+Set `PROTECTED_PHONE_NUMBERS` in the relay's private `.env` to the bot's E.164 and local phone-number formats, comma-separated. Generate salted SHA-256 verification fingerprints on the private host and set the descriptor (`salt`, `lengths`, `hashes`) as the Worker secret `PROTECTED_PHONE_FINGERPRINTS`. The actual phone number stays on the VPS. Never commit it or include it in browser configuration. Group mode refuses to start without a private number filter.
+
+For group posts, the relay removes the bot's actual mention pill using its Matrix identity, discards quoted reply fallbacks, and publishes only the remaining message/caption. The bridge's plain body is not safe: it may expand a mention to a phone number. Missing or unrecognizable mention formatting is rejected rather than published. A separate filter covers formatted/Unicode-digit versions of the protected number in every outgoing text/caption. The Worker filters them before storage and on legacy public reads as another layer.
+
 ### Groups: only explicit bot mentions publish
 
 Set `GROUP_POSTING=mentions` to enable group posting, or `disabled` for DMs only (the code default). The example environment enables mentions. Add the dedicated bot as a group member, then type `@` in Signal and **select the bot from the member picker**. The resulting message, including a supported image/video caption, is submitted publicly. Ordinary group messages, mentions of other members, literal unselected `@bot` text, room-wide notifications, and a reply to the bot without an explicit mention do not publish.

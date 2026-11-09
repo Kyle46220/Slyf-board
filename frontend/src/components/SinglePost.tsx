@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { type Post } from "../types";
 import { fetchPost } from "../api";
 import { PostCard } from "./PostCard";
@@ -18,12 +18,11 @@ export function SinglePost() {
       .catch(() => setNotFound(true));
   }, [hash, origin]);
 
-  if (notFound) return <div className="p-8 text-zinc-500">Post not found.</div>;
-  if (!post) return <div className="p-8 text-zinc-500">Loading...</div>;
-
   return (
     <div className="max-w-xl mx-auto p-8">
-      <PostCard post={post} />
+      <Link to="/" className="embed-back inline-block mb-4 text-blue-600 underline">← Back to board</Link>
+      {notFound ? <p className="text-zinc-500">Post not found.</p>
+        : post ? <PostCard post={post} /> : <p className="text-zinc-500">Loading...</p>}
     </div>
   );
 }

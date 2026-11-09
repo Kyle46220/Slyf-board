@@ -20,6 +20,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+import unicodedata
 
 MAX_MEDIA = 10 * 1024 * 1024
 LOG = logging.getLogger('relay')
@@ -122,6 +123,71 @@ class MentionLinks(HTMLParser):
             self.quoted -= 1
 
 
+class PublicMessage(HTMLParser):
+    """Convert bridged text to plain content, dropping bot pills and reply quotes."""
+    def __init__(self, bot_ids):
+        super().__init__(convert_charrefs=True)
+        self.bot_ids = bot_ids
+        self.parts = []
+        self.quote_depth = 0
+        self.skip_anchor = False
+        self.removed_bot = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == 'mx-reply':
+            self.quote_depth += 1
+        if self.quote_depth:
+            return
+        if tag == 'a':
+            try:
+                url = urllib.parse.urlsplit(dict(attrs).get('href', ''))
+                target = urllib.parse.unquote(url.fragment).lstrip('/').split('?', 1)[0]
+                self.skip_anchor = url.scheme == 'https' and url.netloc == 'matrix.to' and target in self.bot_ids
+            except ValueError:
+                self.skip_anchor = False
+            self.removed_bot |= self.skip_anchor
+        if tag in ('br', 'p', 'div', 'pre', 'blockquote') and not self.skip_anchor:
+            self.parts.append('\n')
+
+    def handle_endtag(self, tag):
+        if tag == 'mx-reply' and self.quote_depth:
+            self.quote_depth -= 1
+        elif not self.quote_depth:
+            if tag == 'a':
+                self.skip_anchor = False
+            elif tag in ('p', 'div', 'pre', 'blockquote'):
+                self.parts.append('\n')
+
+    def handle_data(self, data):
+        if not self.quote_depth and not self.skip_anchor:
+            self.parts.append(data)
+
+
+def phone_patterns(values):
+    patterns = []
+    for value in values:
+        digits = ''.join(str(unicodedata.decimal(c)) for c in value if c.isdecimal())
+        if not 8 <= len(digits) <= 15:
+            raise ValueError('Protected phone values must contain 8 to 15 digits')
+        patterns.append(re.compile(r'(?:[^\w]|_)*'.join(digits)))
+    return patterns
+
+
+def redact_phones(body, patterns):
+    # Preserve offsets and ordinary Unicode text while matching non-ASCII digits too.
+    normalized = ''.join(str(unicodedata.decimal(c)) if c.isdecimal() else c for c in body)
+    spans = sorted((m.start(), m.end()) for p in patterns for m in p.finditer(normalized))
+    merged = []
+    for start, end in spans:
+        if merged and start <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(end, merged[-1][1]))
+        else:
+            merged.append((start, end))
+    for start, end in reversed(merged):
+        body = body[:start] + '[redacted]' + body[end:]
+    return body
+
+
 def signal_chat_type(channel_id):
     if not isinstance(channel_id, str):
         return None
@@ -155,6 +221,10 @@ class Relay:
         aliases = {x.strip() for x in os.getenv('BOT_MENTION_IDS', '').split(',') if x.strip()}
         if any(not self.ghost.fullmatch(x) for x in aliases):
             raise ValueError('BOT_MENTION_IDS must contain local Signal ghost IDs')
+        protected = [x.strip() for x in os.getenv('PROTECTED_PHONE_NUMBERS', '').split(',') if x.strip()]
+        if self.group_posting == 'mentions' and not protected:
+            raise ValueError('Configure private PROTECTED_PHONE_NUMBERS before enabling groups')
+        self.protected_phones = phone_patterns(protected)
         self.mention_ids = aliases | {self.user}
         self.own_ghosts = set(aliases)
         self.group_rooms = set()
@@ -272,6 +342,17 @@ class Relay:
                 raise Rejected('Text must be at most 50,000 characters.')
             if content.get('m.relates_to', {}).get('m.in_reply_to') and body.startswith('> '):
                 body = body.split('\n\n', 1)[1] if '\n\n' in body else ''
+            if room in self.group_rooms:
+                # Never publish the bridge's plain-text mention expansion: it can
+                # be the account's phone number, even when the phone shows a name.
+                if content.get('format') != 'org.matrix.custom.html' or not isinstance(content.get('formatted_body'), str):
+                    raise Rejected('Could not safely remove the bot mention. Please resend the mention and message.')
+                public = PublicMessage(self.mention_ids | self.own_ghosts)
+                public.feed(content['formatted_body'])
+                if not public.removed_bot:
+                    raise Rejected('Could not safely remove the bot mention. Please resend the mention and message.')
+                body = ''.join(public.parts).strip()
+            body = redact_phones(body, self.protected_phones)
             media = None
             if kind != 'm.text':
                 if 'file' in content:

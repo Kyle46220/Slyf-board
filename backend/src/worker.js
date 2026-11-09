@@ -3,6 +3,56 @@ const HASH = /^[a-f0-9]{64}$/;
 const columns = 'hash, content_type, body, media_path, og_title, og_description, og_image_path, created_at';
 const json = (data, status = 200, headers = {}) => Response.json(data, {status, headers});
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
+// Only salted verification fingerprints leave the private Signal host.
+async function publicText(value, env) {
+  if (typeof value !== 'string' || !env.PROTECTED_PHONE_FINGERPRINTS) return value;
+  const {salt, lengths, hashes} = JSON.parse(env.PROTECTED_PHONE_FINGERPRINTS);
+  if (typeof salt !== 'string' || !Array.isArray(lengths) || !Array.isArray(hashes)
+      || lengths.some(n => !Number.isInteger(n) || n < 8 || n > 15)) throw new Error('Invalid private filter');
+  const digitValues = new Map();
+  const normalized = value.replace(/[^\x00-\x7F]/gu, char => {
+    if (!/\p{Nd}/u.test(char)) return char;
+    if (!digitValues.has(char)) {
+      const code = char.codePointAt(0);
+      let zero = code;
+      while (/\p{Nd}/u.test(String.fromCodePoint(zero - 1))) zero--;
+      digitValues.set(char, String((code - zero) % 10));
+    }
+    return digitValues.get(char);
+  });
+  const protectedHashes = new Set(hashes);
+  const spans = [];
+  for (const run of normalized.matchAll(/[0-9](?:[^\p{L}\p{N}]*[0-9])*/gu)) {
+    const digits = [...run[0].matchAll(/[0-9]/g)];
+    if (digits.length > 64) {
+      // Bound work for adversarial or unusually long numeric strings.
+      spans.push([run.index, run.index + run[0].length]);
+      continue;
+    }
+    const sequence = digits.map(d => d[0]).join('');
+    for (const length of lengths) {
+      for (let i = 0; i + length <= digits.length; i++) {
+        const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + sequence.slice(i, i + length)));
+        const hash = [...new Uint8Array(bytes)].map(b => b.toString(16).padStart(2, '0')).join('');
+        if (protectedHashes.has(hash)) spans.push([run.index + digits[i].index, run.index + digits[i + length - 1].index + 1]);
+      }
+    }
+  }
+  spans.sort((a, b) => a[0] - b[0]);
+  const merged = [];
+  for (const span of spans) {
+    const last = merged[merged.length - 1];
+    if (last && span[0] <= last[1]) last[1] = Math.max(last[1], span[1]);
+    else merged.push([...span]);
+  }
+  let safe = normalized;
+  for (const [start, end] of merged.reverse()) safe = safe.slice(0, start) + '[redacted]' + safe.slice(end);
+  return merged.length ? safe : value;
+}
+async function publicPost(post, env) {
+  const [body, title, description] = await Promise.all([publicText(post.body, env), publicText(post.og_title, env), publicText(post.og_description, env)]);
+  return {...post, body, og_title: title, og_description: description};
+}
 export async function authorized(request, secret) {
   if (!secret || secret.length < 32) return false;
   const actual = request.headers.get('Authorization') || '';
@@ -41,6 +91,7 @@ async function ingest(request, env) {
   try { form = await new Response(blob, {headers: {'Content-Type': request.headers.get('Content-Type') || ''}}).formData(); }
   catch { throw new HttpError(400, 'Expected multipart form'); }
   const post = validatePost(form);
+  post.body = await publicText(post.body, env);
   // A tombstone is deliberately retained after deletion, so retries cannot resurrect it.
   const existing = await env.DB.prepare('SELECT hash FROM posts WHERE hash = ?').bind(post.hash).first();
   if (existing) return json({hash: post.hash, duplicate: true});
@@ -81,12 +132,12 @@ async function route(request, env) {
       ? env.DB.prepare(`SELECT ${columns} FROM posts WHERE deleted = 0 AND id < (SELECT id FROM posts WHERE hash = ?) ORDER BY id DESC LIMIT ?`).bind(before, limit)
       : env.DB.prepare(`SELECT ${columns} FROM posts WHERE deleted = 0 ORDER BY id DESC LIMIT ?`).bind(limit);
     const {results} = await statement.all();
-    return json(results, 200, {'Cache-Control': 'public, max-age=0, s-maxage=15'});
+    return json(await Promise.all(results.map(post => publicPost(post, env))), 200, {'Cache-Control': 'public, max-age=0, s-maxage=15'});
   }
   const single = path.match(/^\/api\/posts\/([a-f0-9]{64})$/);
   if (single) {
     const post = await env.DB.prepare(`SELECT ${columns} FROM posts WHERE hash = ? AND deleted = 0`).bind(single[1]).first();
-    return post ? json(post) : json({error: 'Not found'}, 404);
+    return post ? json(await publicPost(post, env)) : json({error: 'Not found'}, 404);
   }
   const media = path.match(/^\/media\/([a-f0-9]{64})\/(media\.(?:webp|mp4)|og.webp)$/);
   if (media) {
