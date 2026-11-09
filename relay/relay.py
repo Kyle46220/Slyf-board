@@ -188,7 +188,7 @@ class Relay:
                 raise Rejected('Send a non-empty message.')
             payload, content_type = multipart(key, body, media)
             request(self.board + '/api/ingest', self.ingest_token, 'POST', payload, content_type)
-            self.reply(room, event_id, 'Posted to the public board: ' + self.board + '/#/post/' + key)
+            self.reply(room, event_id, 'Posted to the public board: https://board.slyfe.fyi/#/post/' + key)
         except Rejected as error:
             self.reply(room, event_id, str(error))
 
