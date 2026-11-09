@@ -128,6 +128,12 @@ export default {
     response.headers.set('X-Content-Type-Options', 'nosniff');
     response.headers.set('Referrer-Policy', 'no-referrer');
     response.headers.set('X-Frame-Options', 'DENY');
+    // Public gallery reads can be embedded on another site. Ingest/admin stay private.
+    const path = new URL(request.url).pathname;
+    if (['GET', 'HEAD'].includes(request.method) && /^\/api\/posts(?:\/[a-f0-9]{64})?$/.test(path)) {
+      response.headers.set('Access-Control-Allow-Origin', '*');
+    }
+
     if (!response.headers.has('Cache-Control')) response.headers.set('Cache-Control', 'no-store');
     return response;
   }

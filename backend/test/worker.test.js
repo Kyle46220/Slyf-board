@@ -91,3 +91,19 @@ test('D1 failure returns retryable error, never false success', async () => {
   assert.equal(response.status, 503);
   assert.deepEqual(await response.json(), {error: 'Service unavailable'});
 });
+
+
+test('cross-origin gallery reads work without opening write or admin endpoints', async () => {
+  const {post, call} = setup(); await post();
+  const headers = {Origin: 'https://example.bearblog.dev'};
+  for (const path of ['/api/posts', `/api/posts/${hash}`, `/api/posts/${'e'.repeat(64)}`]) {
+    const response = await call(path, {headers});
+    assert.equal(response.headers.get('Access-Control-Allow-Origin'), '*');
+    assert.equal(response.headers.get('Access-Control-Allow-Credentials'), null);
+  }
+  for (const [path, method] of [['/api/ingest', 'POST'], [`/api/admin/posts/${hash}`, 'DELETE'], ['/api/posts', 'POST']]) {
+    const response = await call(path, {method, headers});
+    assert.equal(response.headers.get('Access-Control-Allow-Origin'), null);
+    assert.ok([401, 405].includes(response.status));
+  }
+});

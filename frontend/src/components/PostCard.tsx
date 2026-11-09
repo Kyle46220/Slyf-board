@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useNavigate } from "react-router-dom";
 import { type Post } from "../types";
+import { boardUrl, useBoardContext } from "../BoardContext";
 
 interface Props {
   post: Post;
@@ -44,11 +45,12 @@ function LazyVideo({ src }: { src: string }) {
 
 export function PostCard({ post }: Props) {
   const navigate = useNavigate();
+  const { origin } = useBoardContext();
 
   const mediaUrl = post.media_path
     ? (post.media_path.startsWith('http') || post.media_path.startsWith('/media/')) 
-      ? post.media_path 
-      : `/media/${post.hash}/${post.content_type === "video" ? "media.mp4" : "media.webp"}`
+      ? boardUrl(post.media_path, origin)
+      : boardUrl(`/media/${post.hash}/${post.content_type === "video" ? "media.mp4" : "media.webp"}`, origin)
     : null;
 
   const RAINBOW_COLORS = [
@@ -111,7 +113,7 @@ export function PostCard({ post }: Props) {
             className="block overflow-hidden rounded mb-3 group/img relative"
           >
             <LazyImage
-              src={post.og_image_path.startsWith('http') ? post.og_image_path : `/media/${post.hash}/og.webp`}
+              src={boardUrl(post.og_image_path.startsWith('http') ? post.og_image_path : `/media/${post.hash}/og.webp`, origin)}
               alt="link preview"
             />
             <div className="absolute inset-0 bg-black/10 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">

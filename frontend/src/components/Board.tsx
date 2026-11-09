@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { type Post } from '../types';
 import { fetchPosts } from '../api';
 import { PostCard } from './PostCard';
+import { useBoardContext } from '../BoardContext';
 
 export function Board() {
+  const { origin, embedded } = useBoardContext();
   const [posts, setPosts] = useState<Post[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -22,7 +24,7 @@ export function Board() {
       controller = new AbortController();
       const timeout = setTimeout(() => controller?.abort(), 15000);
       try {
-        const data = await fetchPosts(controller.signal, before);
+        const data = await fetchPosts(controller.signal, before, origin);
         if (active) { setPosts(data); setError(null); }
       } catch {
         if (active) setError('Unable to refresh the board. Retrying automatically.');
@@ -46,23 +48,23 @@ export function Board() {
       controller?.abort();
       document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [before]);
+  }, [before, origin]);
 
   if (loading) return (
-    <div className="min-h-screen bg-white flex items-center justify-center">
+    <div className={`${embedded ? "min-h-32" : "min-h-screen"} bg-white flex items-center justify-center`}>
       <div aria-label="Loading posts" className="animate-spin h-6 w-6 border-2 border-black border-t-transparent rounded-full" />
     </div>
   );
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className={`${embedded ? "" : "min-h-screen"} bg-white`}>
       {error && <p role="status" className="text-sm text-zinc-500 p-6">{error}</p>}
       {posts.length === 0 && !error && (
-        <div className="flex items-center justify-center min-h-[70vh]">
+        <div className={`flex items-center justify-center ${embedded ? "min-h-32" : "min-h-[70vh]"}`}>
           <h2 className="text-lg font-medium text-zinc-400">Board Empty</h2>
         </div>
       )}
-      <div className="masonry p-6">
+      <div className={`masonry ${embedded ? "" : "p-6"}`}>
         {posts.map(post => <PostCard key={post.hash} post={post} />)}
       </div>
       <nav aria-label="Gallery pages" className="flex justify-center gap-6 p-6 text-sm text-zinc-500">
