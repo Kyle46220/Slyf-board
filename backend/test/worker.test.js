@@ -107,3 +107,28 @@ test('cross-origin gallery reads work without opening write or admin endpoints',
     assert.ok([401, 405].includes(response.status));
   }
 });
+
+
+test('private bot numbers are filtered on ingestion and legacy public reads', async () => {
+  const {env, post, call, db} = setup();
+  const salt = 'test-only-salt';
+  const numbers = ['19995550123','09995550123'];
+  const hashes = await Promise.all(numbers.map(async n => [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + n)))].map(b => b.toString(16).padStart(2,'0')).join('')));
+  env.PROTECTED_PHONE_FINGERPRINTS = JSON.stringify({salt, lengths:[11], hashes});
+  assert.equal((await post(hash, 'hello +1 (999) 555-0123 world')).status, 201);
+  const row = await (await call('/api/posts/' + hash)).json();
+  assert.ok(row.body.includes('[redacted]')); assert.ok(!row.body.includes('999'));
+  for (const [i, body] of ['１ ９９９ ５５５ ０１２３', '١ ٩٩٩ ٥٥٥ ٠١٢٣'].entries()) {
+    const key = String(i + 1).repeat(64);
+    assert.equal((await post(key, body)).status, 201);
+    assert.ok((await (await call('/api/posts/' + key)).json()).body.includes('[redacted]'));
+  }
+  const legacy = 'e'.repeat(64);
+  db.prepare('INSERT INTO posts(hash, content_type, body, og_title, og_description) VALUES (?, ?, ?, ?, ?)')
+    .run(legacy, 'text', 'legacy 0999 555 0123', '19995550123', 'phone +19995550123');
+  for (const path of ['/api/posts', '/api/posts/' + legacy]) {
+    const text = await (await call(path)).text();
+    assert.ok(!text.includes('19995550123')); assert.ok(!text.includes('0999 555 0123'));
+    assert.ok(text.includes('[redacted]')); assert.ok(!text.includes('PROTECTED_PHONE_FINGERPRINTS')); assert.ok(!text.includes('test-only-salt'));
+  }
+});

@@ -59,7 +59,25 @@ The sample uses moving image tags for initial setup. Resolve and pin `SYNAPSE_IM
 6. Run `docker compose up -d --build relay`.
 7. Send a message from another Signal account to the dedicated bot. Accept any pending Signal message request on the linked phone if Signal requires it. The bridge creates a portal; the relay joins invitations from the bridge bot and publishes messages from Signal ghost users in verified direct-message portals.
 
-By default groups are excluded. To publish from specific group portals, set `ALLOWED_ROOMS` to comma-separated Matrix room IDs. When set, **only** these rooms are eligible, including DMs. Tell all participants these rooms publish publicly. Do not enable backfill on a personal account.
+### Canonical domain and confirmations
+
+Set `BOARD_URL=https://board.slyfe.fyi` (or your own canonical Worker domain) in the private relay `.env`. This domain must serve the Worker API as well as the gallery. Recreate the relay after editing `.env`; editing the file alone does not change a running container. The relay submits there, validates the returned event hash, reads back the public post, and only then replies with `/post/HASH`. Existing `/#/post/HASH` links are redirected by the frontend. A 2xx HTML page, mismatched response or unreadable post cannot produce a success confirmation.
+
+### Private bot-number protection
+
+Set `PROTECTED_PHONE_NUMBERS` in the relay's private `.env` to the bot's E.164 and local phone-number formats, comma-separated. Generate salted SHA-256 verification fingerprints on the private host and set the descriptor (`salt`, `lengths`, `hashes`) as the Worker secret `PROTECTED_PHONE_FINGERPRINTS`. The actual phone number stays on the VPS. Never commit it or include it in browser configuration. Group mode refuses to start without a private number filter.
+
+For group posts, the relay removes the bot's actual mention pill using its Matrix identity, discards quoted reply fallbacks, and publishes only the remaining message/caption. The bridge's plain body is not safe: it may expand a mention to a phone number. Missing or unrecognizable mention formatting is rejected rather than published. A separate filter covers formatted/Unicode-digit versions of the protected number in every outgoing text/caption. The Worker filters them before storage and on legacy public reads as another layer.
+
+### Groups: only explicit bot mentions publish
+
+Set `GROUP_POSTING=mentions` to enable group posting, or `disabled` for DMs only (the code default). The example environment enables mentions. Add the dedicated bot as a group member, then type `@` in Signal and **select the bot from the member picker**. The resulting message, including a supported image/video caption, is submitted publicly. Ordinary group messages, mentions of other members, literal unselected `@bot` text, room-wide notifications, and a reply to the bot without an explicit mention do not publish.
+
+The relay joins Matrix invitations from the bridge bot and its exclusive local Signal ghost namespace. The official bridge mirrors acceptance of a pending group invite to Signal, so a phone tap is normally unnecessary when Signal delivers the invitation to the linked bridge. Signal's group-admin approval and invitation rules still apply; if no invitation reaches the bridge, accept it once on the linked phone. The relay cannot bypass Signal's own approval requirements.
+
+Native mentions normally target `MATRIX_USER`. For bridge versions that use the linked account's ghost instead, set `BOT_MENTION_IDS` to that account's local Matrix ghost ID, for example `@signal_YOUR_LINKED_ACCOUNT_UUID:board.local` (comma-separated aliases are accepted). Keep account identifiers in the private `.env`, never in frontend code. The own ghost is also excluded from ingestion to prevent echoes.
+
+`ALLOWED_ROOMS` is an optional comma-separated restriction: when nonempty, only those Matrix portal IDs may be joined/publish, including DMs. Groups still require a bot mention. Tell participants that mentioning this bot publishes the message publicly. Never enable backfill on a personal account. Group posting has a durable activation cutoff, so enabling it does not publish earlier group history.
 
 The relay ignores messages timestamped before its first start. Its durable `relay-state` volume holds the start timestamp, sync cursor and room checkpoints. Preserve this volume across upgrades. Deleting it resets the cutoff and can skip messages received during downtime.
 
@@ -71,7 +89,10 @@ The relay ignores messages timestamped before its first start. Its durable `rela
 - Send another message while the relay is stopped; restart it and verify recovery once. Repeat while the Worker is unavailable; no false success reply should be sent.
 - Retry the same Matrix event / restart after storage succeeds; verify one card.
 - Delete a card using the admin endpoint, retry its original delivery, and verify it stays deleted. The gallery list cache may show it for up to 15 seconds before the next display refresh.
-- Verify a random Matrix room and a non-allowlisted group never publish.
+- Verify ordinary messages, other-user mentions and reply-only notifications in a Signal group never publish. Verify a real bot @mention publishes once and replies with a working link.
+- Invite the bot to a fresh group and verify automatic acceptance where Signal delivers the invitation.
+- Verify an untrusted Matrix room and any room excluded by `ALLOWED_ROOMS` never publish.
+- Restore/focus a mobile browser tab and verify it fetches fresh posts. Check both `/post/HASH` and legacy `/#/post/HASH` links.
 - Verify a fresh Signal sender/message request reaches the board. This can depend on Signal account/message-request state and cannot be established by unit tests.
 
 Delete a post with `DELETE /api/admin/posts/HASH` and `Authorization: Bearer ADMIN_TOKEN` from an operator-side HTTP client. No admin secret belongs in the browser. Deletion hides the record, removes new-style R2 media, and retains the hash tombstone so delivery retries cannot republish it. External legacy media URLs are not deleted automatically; remove their original objects separately if needed.

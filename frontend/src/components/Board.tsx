@@ -41,12 +41,16 @@ export function Board() {
       if (!document.hidden) { clearTimeout(timer); void refresh(); }
     };
     document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('pageshow', onVisible);
+    window.addEventListener('focus', onVisible);
     void refresh();
     return () => {
       active = false;
       clearTimeout(timer);
       controller?.abort();
       document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('pageshow', onVisible);
+      window.removeEventListener('focus', onVisible);
     };
   }, [before, origin]);
 

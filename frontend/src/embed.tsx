@@ -1,5 +1,5 @@
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter, Routes, Route, Link } from "react-router-dom";
+import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { Board } from "./components/Board";
 import { SinglePost } from "./components/SinglePost";
 import { BoardContext } from "./BoardContext";
@@ -37,14 +37,7 @@ if (script?.src) {
                   <Route path="/" element={<Board />} />
                   <Route
                     path="/post/:hash"
-                    element={
-                      <>
-                        <Link to="/" className="embed-back">
-                          ← Back to board
-                        </Link>
-                        <SinglePost />
-                      </>
-                    }
+                    element={<SinglePost />}
                   />
                 </Routes>
               </MemoryRouter>

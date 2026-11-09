@@ -1,4 +1,7 @@
+import base64
+import hashlib
 import io
+import urllib.error
 import json
 import os
 from pathlib import Path
@@ -17,7 +20,9 @@ class RelayTests(unittest.TestCase):
             'MATRIX_URL': 'http://synapse:8008', 'MATRIX_TOKEN': 'private',
             'MATRIX_USER': '@board:board.local', 'BRIDGE_BOT': '@signalbot:board.local',
             'BOARD_URL': 'https://board.example', 'INGEST_TOKEN': 'a' * 64,
-            'STATE_DIR': self.directory.name, 'ALLOWED_ROOMS': ''})
+            'STATE_DIR': self.directory.name, 'ALLOWED_ROOMS': '',
+            'GROUP_POSTING': 'disabled', 'BOT_MENTION_IDS': '',
+            'PROTECTED_PHONE_NUMBERS': '+19995550123,09995550123'})
         self.env.start()
         self.r = relay.Relay()
         self.event = {'type': 'm.room.message', 'event_id': '$event',
@@ -25,22 +30,40 @@ class RelayTests(unittest.TestCase):
                       'origin_server_ts': self.r.started + 1,
                       'content': {'msgtype': 'm.text', 'body': 'Hello public board'}}
 
+    def board_response(self, url, token, method='GET', data=None, *args, **kwargs):
+        if method == 'POST':
+            key = data.split(b'name="event_id"\r\n\r\n')[1][:64].decode()
+        else:
+            key = url.rsplit('/', 1)[-1]
+        return json.dumps({'hash': key}).encode()
+
+    def group_state(self):
+        return [{'type': 'm.bridge', 'sender': self.r.bot, 'content': {
+            'protocol': {'id': 'signal'}, 'channel': {'id': base64.b64encode(b'g' * 32).decode()}}}]
+
+    def enable_group(self):
+        self.r.group_posting = 'mentions'
+        with patch.object(self.r, 'matrix_json', return_value=self.group_state()):
+            self.assertTrue(self.r.trusted('!group'))
+
     def tearDown(self):
         self.r.db.close()
         self.env.stop()
         self.directory.cleanup()
 
     def test_ingest_payload_never_contains_sender_and_retry_id_is_stable(self):
-        with patch.object(relay, 'request', return_value=b'{}') as req, patch.object(self.r, 'reply') as reply:
+        with patch.object(relay, 'request', side_effect=self.board_response) as req, patch.object(self.r, 'reply') as reply:
             self.r.handle('!room:board.local', self.event)
-            first = req.call_args.args[3]
+            first = req.call_args_list[0].args[3]
             self.r.handle('!room:board.local', self.event)
-            second = req.call_args.args[3]
+            second = req.call_args_list[2].args[3]
             self.assertIn(b'Hello public board', first)
             self.assertNotIn(self.event['sender'].encode(), first)
             self.assertNotIn(b'$event', first)
             self.assertEqual(first.split(b'name="event_id"\r\n\r\n')[1][:64], second.split(b'name="event_id"\r\n\r\n')[1][:64])
-            self.assertIn('/#/post/', reply.call_args.args[2])
+            self.assertIn('https://board.example/post/', reply.call_args.args[2])
+            self.assertNotIn('/#/', reply.call_args.args[2])
+            self.assertEqual(req.call_args_list[1].args[0], 'https://board.example/api/posts/' + hashlib.sha256(('!room:board.local\0' + self.event['event_id']).encode()).hexdigest())
 
     def test_ignores_old_non_signal_own_echoes_and_edits(self):
         cases = [dict(self.event, sender='@other:board.local'), dict(self.event, origin_server_ts=0),
@@ -56,8 +79,9 @@ class RelayTests(unittest.TestCase):
             'protocol': {'id': 'signal'}, 'channel': {'id': 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'}}}]
         with patch.object(self.r, 'matrix_json', return_value=state):
             self.assertTrue(self.r.trusted('!room'))
-            state[0]['content']['channel']['id'] = 'group-id'
+            state[0]['content']['channel']['id'] = base64.b64encode(b'g' * 32).decode()
             self.assertFalse(self.r.trusted('!room'))
+            self.r.group_posting = 'mentions'
             self.r.allowed_rooms = {'!room'}
             self.assertTrue(self.r.trusted('!room'))
             state.append({'type': 'm.room.encryption'})
@@ -110,9 +134,167 @@ class RelayTests(unittest.TestCase):
     def test_reply_fallback_is_removed(self):
         self.event['content'] = {'msgtype': 'm.text', 'body': '> <@private:server> secret\n\npublic',
                                  'm.relates_to': {'m.in_reply_to': {'event_id': '$old'}}}
-        with patch.object(relay, 'request', return_value=b'{}') as req, patch.object(self.r, 'reply'):
+        with patch.object(relay, 'request', side_effect=self.board_response) as req, patch.object(self.r, 'reply'):
             self.r.handle('!room', self.event)
-            self.assertNotIn(b'secret', req.call_args.args[3])
-            self.assertIn(b'public', req.call_args.args[3])
+            self.assertNotIn(b'secret', req.call_args_list[0].args[3])
+            self.assertIn(b'public', req.call_args_list[0].args[3])
+
+
+    def test_group_only_publishes_structured_bot_mentions(self):
+        self.enable_group()
+        cases = [
+            ({'msgtype': 'm.text', 'body': '@board plain text'}, False),
+            ({'msgtype': 'm.text', 'body': 'everyone', 'm.mentions': {'room': True}}, False),
+            ({'msgtype': 'm.text', 'body': 'other', 'm.mentions': {'user_ids': [self.event['sender']]}}, False),
+            ({'msgtype': 'm.text', 'body': 'malformed', 'm.mentions': {'user_ids': self.r.user}}, False),
+            ({'msgtype': 'm.text', 'body': 'public', 'm.mentions': {'user_ids': [self.r.user]}}, True),
+        ]
+        for content, expected in cases:
+            with self.subTest(content=content), patch.object(relay, 'request', side_effect=self.board_response) as req, patch.object(self.r, 'reply') as reply:
+                if expected:
+                    content.update(format='org.matrix.custom.html', formatted_body='<a href="https://matrix.to/#/@board:board.local">+19995550123</a> public')
+                self.r.handle('!group', dict(self.event, content=content))
+                self.assertEqual(req.called, expected)
+                self.assertEqual(reply.called, expected)
+
+    def test_reply_notification_and_quoted_bot_mention_are_not_triggers(self):
+        self.enable_group()
+        content = {'msgtype': 'm.text', 'body': '> quoted bot\n\nprivate reply',
+                   'm.mentions': {'user_ids': [self.r.user]},
+                   'm.relates_to': {'m.in_reply_to': {'event_id': '$reply'}}}
+        for html in [None, '<mx-reply><a href="https://matrix.to/#/@board:board.local">bot</a></mx-reply>private reply']:
+            c = dict(content)
+            if html: c.update(format='org.matrix.custom.html', formatted_body=html)
+            with patch.object(relay, 'request') as req:
+                self.r.handle('!group', dict(self.event, content=c))
+                req.assert_not_called()
+        content.update(format='org.matrix.custom.html', formatted_body='<mx-reply>quote</mx-reply><a href="https://matrix.to/#/%40board%3Aboard.local">bot</a> public')
+        with patch.object(relay, 'request', side_effect=self.board_response) as req, patch.object(self.r, 'reply'):
+            self.r.handle('!group', dict(self.event, content=content))
+            self.assertIn(b'public', req.call_args_list[0].args[3])
+            self.assertNotIn(b'quoted bot', req.call_args_list[0].args[3])
+
+    def test_group_ghost_alias_and_own_echo(self):
+        self.enable_group()
+        own = '@signal_11111111-2222-3333-4444-555555555555:board.local'
+        self.r.mention_ids.add(own)
+        self.r.own_ghosts.add(own)
+        content = {'msgtype': 'm.text', 'body': 'publish', 'm.mentions': {'user_ids': [own]}, 'format':'org.matrix.custom.html', 'formatted_body':'<a href="https://matrix.to/#/'+own+'">+19995550123</a> publish'}
+        with patch.object(relay, 'request', side_effect=self.board_response) as req, patch.object(self.r, 'reply'):
+            self.r.handle('!group', dict(self.event, content=content))
+            self.assertTrue(req.called)
+            req.reset_mock()
+            self.r.handle('!group', dict(self.event, content=content, sender=own))
+            req.assert_not_called()
+
+    def test_group_media_requires_mention_and_preserves_caption(self):
+        self.enable_group()
+        source = io.BytesIO(); Image.new('RGB', (5, 5), 'red').save(source, format='JPEG')
+        content = {'msgtype': 'm.image', 'body': 'bot public caption', 'filename': 'image.jpg',
+                   'url': 'mxc://board.local/media123', 'm.mentions': {'user_ids': [self.r.user]},
+                   'format':'org.matrix.custom.html', 'formatted_body':'<a href="https://matrix.to/#/@board:board.local">+19995550123</a> public caption'}
+        def response(url, token, *args, **kwargs):
+            return source.getvalue() if '/media/download/' in url else self.board_response(url, token, *args, **kwargs)
+        with patch.object(relay, 'request', side_effect=response) as req, patch.object(self.r, 'reply'):
+            self.r.handle('!group', dict(self.event, content=content))
+            upload = next(c for c in req.call_args_list if c.args[0].endswith('/api/ingest'))
+            self.assertIn(b'public caption', upload.args[3])
+            self.assertNotIn(b'19995550123', upload.args[3])
+            self.assertIn(b'image/webp', upload.args[3])
+            req.reset_mock(); content.pop('m.mentions')
+            self.r.handle('!group', dict(self.event, content=content)); req.assert_not_called()
+
+    def test_group_cutoff_skips_history_and_allowlist_still_restricts(self):
+        self.enable_group()
+        self.r.group_started = self.event['origin_server_ts'] + 1
+        content = {'msgtype': 'm.text', 'body': 'old', 'm.mentions': {'user_ids': [self.r.user]}}
+        with patch.object(relay, 'request') as req:
+            self.r.handle('!group', dict(self.event, content=content)); req.assert_not_called()
+        self.r.allowed_rooms = {'!different'}
+        with patch.object(self.r, 'matrix_json', return_value=self.group_state()):
+            self.assertFalse(self.r.trusted('!group'))
+        self.r.allowed_rooms.clear()
+        with patch.object(self.r, 'matrix_json', return_value=[{'type':'m.bridge','sender':'@fake:board.local','content':self.group_state()[0]['content']}]):
+            self.assertFalse(self.r.trusted('!group'))
+
+    def test_invites_accept_bridge_bot_and_local_ghost_only(self):
+        self.r.group_posting = 'mentions'
+        def invite(sender, target=None):
+            return {'invite_state': {'events': [{'type': 'm.room.member', 'state_key': target or self.r.user,
+                    'sender': sender, 'content': {'membership': 'invite'}}]}}
+        invites = {'!bot': invite(self.r.bot), '!group': invite(self.event['sender']),
+                   '!other': invite('@other:board.local'), '!foreign': invite('@signal_abc:evil.example'),
+                   '!wrongtarget': invite(self.event['sender'], '@other:board.local')}
+        with patch.object(self.r, 'matrix_json') as req:
+            self.r.join_invites(invites)
+            self.assertEqual({c.args[0] for c in req.call_args_list}, {'/join/%21bot', '/join/%21group'})
+        self.r.group_posting = 'disabled'
+        with patch.object(self.r, 'matrix_json') as req:
+            self.r.join_invites({'!group': invite(self.event['sender'])}); req.assert_not_called()
+
+    def test_invalid_ingest_response_or_unreadable_post_never_confirms(self):
+        key = hashlib.sha256(('!room\0' + self.event['event_id']).encode()).hexdigest()
+        for replies in [[b'<html>wrong page</html>'], [b'{}'], [b'{"hash":"wrong"}'],
+                        [json.dumps({'hash':key}).encode(), b'{"hash":"wrong"}']]:
+            with self.subTest(replies=replies), patch.object(relay, 'request', side_effect=replies), patch.object(self.r, 'reply') as reply:
+                with self.assertRaises((RuntimeError, ValueError)):
+                    self.r.handle('!room', self.event)
+                reply.assert_not_called()
+        missing = urllib.error.HTTPError('https://board.example', 404, 'missing', {}, None)
+        with patch.object(relay, 'request', side_effect=[json.dumps({'hash':key}).encode(), missing]), patch.object(self.r, 'reply') as reply:
+            with self.assertRaises(urllib.error.HTTPError): self.r.handle('!room', self.event)
+            reply.assert_not_called()
+
+    def test_deleted_duplicate_is_not_reported_as_posted(self):
+        key = hashlib.sha256(('!room\0' + self.event['event_id']).encode()).hexdigest()
+        missing = urllib.error.HTTPError('https://board.example', 404, 'missing', {}, None)
+        with patch.object(relay, 'request', side_effect=[json.dumps({'hash':key, 'duplicate': True}).encode(), missing]), patch.object(self.r, 'reply') as reply:
+            self.r.handle('!room', self.event)
+            self.assertIn('previously removed', reply.call_args.args[2])
+            self.assertNotIn('Posted to', reply.call_args.args[2])
+
+    def test_http_client_identifies_itself_and_public_reads_have_no_token(self):
+        with patch.object(relay.OPENER, 'open', return_value=io.BytesIO(b'{}')) as opener:
+            relay.request('https://board.example/api/posts', '')
+            headers = dict(opener.call_args.args[0].header_items())
+            self.assertEqual(headers['User-agent'], 'SlyfBoard-Relay/1.0')
+            self.assertNotIn('Authorization', headers)
+
+
+    def test_group_phone_mention_is_removed_before_upload(self):
+        self.enable_group()
+        content = {'msgtype':'m.text', 'body':'+19995550123 group mention test',
+                   'm.mentions':{'user_ids':[self.r.user]}, 'format':'org.matrix.custom.html',
+                   'formatted_body':'<a href="https://matrix.to/#/@board:board.local"><strong>+19995550123</strong></a> group mention test'}
+        with patch.object(relay, 'request', side_effect=self.board_response) as req, patch.object(self.r, 'reply'):
+            self.r.handle('!group', dict(self.event, content=content))
+            payload=req.call_args_list[0].args[3]
+            self.assertIn(b'group mention test', payload)
+            for private in [b'19995550123', self.r.user.encode(), b'matrix.to', b'<strong>']:
+                self.assertNotIn(private, payload)
+
+    def test_phone_guard_covers_formatted_numbers_unicode_and_dms(self):
+        samples=['+1 (999) 555-0123', '19995550123', '0999 555 0123',
+                 '１ ９９９ ５５５ ０１２３', '1\u200b999\u200b555\u200b0123', '١ ٩٩٩ ٥٥٥ ٠١٢٣']
+        for value in samples:
+            with self.subTest(value=value):
+                self.assertEqual(relay.redact_phones('before '+value+' after', self.r.protected_phones).replace('+',''), 'before [redacted] after')
+                event=dict(self.event,content={'msgtype':'m.text','body':value})
+                with patch.object(relay,'request',side_effect=self.board_response) as req,patch.object(self.r,'reply'):
+                    self.r.handle('!dm',event)
+                    self.assertIn(b'[redacted]',req.call_args_list[0].args[3])
+                    self.assertNotIn(b'19995550123',req.call_args_list[0].args[3])
+
+    def test_unsafe_group_format_is_rejected_and_mention_only_is_empty(self):
+        self.enable_group()
+        for extra in [{}, {'format':'org.matrix.custom.html','formatted_body':'unrelated'},
+                      {'format':'org.matrix.custom.html','formatted_body':'<a href="https://matrix.to/#/@board:board.local">+19995550123</a>'}]:
+            content={'msgtype':'m.text','body':'+19995550123','m.mentions':{'user_ids':[self.r.user]},**extra}
+            with patch.object(relay,'request') as req,patch.object(self.r,'reply') as reply:
+                self.r.handle('!group',dict(self.event,content=content));req.assert_not_called()
+                self.assertTrue(reply.called)
+                self.assertNotIn('19995550123',reply.call_args.args[2])
+        with patch.dict(os.environ,{'GROUP_POSTING':'mentions','PROTECTED_PHONE_NUMBERS':''}):
+            with self.assertRaisesRegex(ValueError,'PROTECTED_PHONE_NUMBERS'):relay.Relay()
 
 if __name__ == '__main__': unittest.main()

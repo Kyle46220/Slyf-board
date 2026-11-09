@@ -67,13 +67,19 @@ const env = {
   },
   ASSETS: {
     async fetch(request) {
-      const path = new URL(request.url).pathname;
+      const requestedPath = new URL(request.url).pathname;
+      const path =
+        requestedPath === "/" || /^\/post\/[a-f0-9]{64}$/.test(requestedPath)
+          ? "/index.html"
+          : requestedPath;
       try {
         return new Response(readFileSync(project + "/frontend/dist" + path), {
           headers: {
             "Content-Type": path.endsWith(".js")
               ? "application/javascript; charset=utf-8"
-              : "text/html; charset=utf-8",
+              : path.endsWith(".css")
+                ? "text/css; charset=utf-8"
+                : "text/html; charset=utf-8",
           },
         });
       } catch {
@@ -215,9 +221,70 @@ try {
       path: process.env.EMBED_SCREENSHOT,
       fullPage: false,
     });
+  // A restored mobile tab must refresh immediately instead of waiting for a timer.
+  const insert = (id, body) =>
+    db
+      .prepare(
+        "INSERT INTO posts(hash,content_type,body,created_at) VALUES(?,?,?,?)",
+      )
+      .run(
+        id.toString(16).padStart(64, "0"),
+        "text",
+        body,
+        new Date().toISOString(),
+      );
+  insert(500, "Resumed mobile post");
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new PageTransitionEvent("pageshow", { persisted: true }),
+    ),
+  );
+  await first.getByText("Resumed mobile post", { exact: true }).waitFor();
+  await second.getByText("Resumed mobile post", { exact: true }).waitFor();
+  insert(501, "Focused mobile post");
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await first.getByText("Focused mobile post", { exact: true }).waitFor();
+
+  const mobile = await browser.newPage({
+    viewport: { width: 360, height: 800 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  mobile.on("pageerror", (e) => errors.push(e.message));
+  const hash = (102).toString(16).padStart(64, "0");
+  await mobile.goto(origin + "/#/post/" + hash);
+  await mobile.getByText("Image caption", { exact: true }).waitFor();
+  assert.equal(
+    new URL(mobile.url()).pathname,
+    "/post/" + hash,
+    "Old confirmation links resolve to the post",
+  );
+  assert.equal(new URL(mobile.url()).hash, "");
+  assert.equal(
+    await mobile.locator(".masonry").count(),
+    0,
+    "Confirmation opens details, not the whole gallery",
+  );
+  await mobile.getByRole('link', {name:'← Back to board'}).click();
+  await mobile.locator('.masonry > div').first().waitFor();
+  assert.equal(new URL(mobile.url()).pathname, '/', 'Standalone post links return to the gallery');
+  await mobile.goto(origin + '/post/' + 'f'.repeat(64));
+  await mobile.getByText('Post not found.', {exact:true}).waitFor();
+  await mobile.getByRole('link', {name:'← Back to board'}).click();
+  await mobile.locator('.masonry > div').first().waitFor();
+  await mobile.goto(origin + "/");
+  await mobile.getByText("Focused mobile post", { exact: true }).waitFor();
+  insert(502, "Standalone resumed post");
+  await mobile.evaluate(() =>
+    window.dispatchEvent(
+      new PageTransitionEvent("pageshow", { persisted: true }),
+    ),
+  );
+  await mobile.getByText("Standalone resumed post", { exact: true }).waitFor();
+  await mobile.close();
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: real cross-origin fetches, 100-card pagination, isolated blog styles, resolved media URLs, responsive 720/320/360px widths, no iframe/overflow, independent navigation, host hash preserved, zero browser errors.",
+    "PASS: real cross-origin fetches, 100-card pagination, isolated blog styles, resolved media URLs, responsive 720/320/360px widths, no iframe/overflow, independent navigation, host hash preserved, mobile tab restoration/focus refresh, legacy confirmation links, zero browser errors.",
   );
 } catch (e) {
   console.log("Browser errors:", errors);
